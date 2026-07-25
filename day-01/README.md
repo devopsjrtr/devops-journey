@@ -11,7 +11,7 @@ Bu repo, Konfigürasyon Yönetim Uzmanlığı'ndan **Modern DevOps & Cloud Engin
 - [x] **Aşama 1: Linux Temelleri & Containerization**
   - [x] Day 1: Linux Sistem Yönetimi, Yetkilendirme & Monitoring Scripti
   - [x] Day 2: Docker Engine Kurulumu & Container Yaşam Döngüsü
-  - [ ] Day 3: Dockerfile Yazımı, Multi-Stage Build Mantığı
+  - [x] Day 3: Dockerfile Yazımı, Multi-Stage Build Mantığı
   - [ ] Day 4: Port Mapping & Container Networking
   - [ ] Day 5: Docker Volume & Persistence Structure
 - [ ] **Aşama 2: CI/CD Pipeline Otomasyonu (Jenkins & SonarQube)**
@@ -131,4 +131,56 @@ chmod +x day-01/sys_check.sh
 3. **Temizlik:**
    ```bash
    docker stop my-web-server && docker rm my-web-server
+   ```
+
+   ---
+
+## 📅 Day 3: Custom Dockerfile Yazımı & Python App Paketleme
+
+> 🎯 **Günün Amacı:** `Dockerfile` talimatlarını öğrenmek, katman (layer) önbellekleme (cache) mantığını kavrayarak hafif ve optimize edilmiş bir Python/Flask container imajı inşa etmek.
+
+### 📚 Özet Ders Notu
+
+* **Dockerfile Mantığı:** Uygulama kodunun, çalışma zamanı (runtime) bağımlılıklarının ve başlatma komutlarının bildirildiği bildirimsel (declarative) bir yapılandırma dosyasıdır.
+* **Build Önbelleği (Cache Optimization):** Docker, değişmeyen komutları önbellekten okur. Sık değişen kod satırları (`COPY . .`) en altlara, bağımlılık kurulumları (`RUN pip install`) üstlere konularak build süreçleri hızlandırılır.
+
+---
+
+### 🛠️ Quick Cheatsheet: Dockerfile Talimatları
+
+| Talimat | İşlevi |
+| :--- | :--- |
+| `FROM` | Taban işletim sistemi veya runtime imajını seçer. |
+| `WORKDIR` | İzleyen komutların çalışacağı dizini belirler. |
+| `COPY` | Yerel sistemden dosya/klasör kopyalar. |
+| `RUN` | Build anında komut çalıştırır (paket kurulumları vs.). |
+| `ENV` | Ortam değişkeni (Environment Variable) tanımlar. |
+| `CMD` | Container başladığında çalışacak ana süreci (process) belirler. |
+
+---
+
+### 🧪 Hands-On Lab: Python/Flask Web App Containerization
+
+1. **Dockerfile:**
+   ```dockerfile
+   FROM python:3.9-slim
+   WORKDIR /app
+   COPY requirements.txt .
+   RUN pip install --no-cache-dir -r requirements.txt
+   COPY . .
+   ENV APP_VERSION=v1.0
+   EXPOSE 5000
+   CMD ["python", "app.py"]
+   ```
+
+2. **Build & Run Komutları:**
+   ```bash
+   # İmajı build et
+   docker build -t my-python-app:v1.0 .
+
+   # Container'ı çalıştır
+   docker run -d --name flask-app -p 5001:5000 my-python-app:v1.0
+
+   # Test et
+   curl http://localhost:5001
    ```
