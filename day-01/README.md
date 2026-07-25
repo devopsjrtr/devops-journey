@@ -1,6 +1,6 @@
 # 🚀 DevOps Yolculuğu: 0'dan Cloud & Kubernetes'e
 
-Welcome! Bu repo, Konfigürasyon Yönetim Uzmanlığı'ndan **Modern DevOps & Cloud Engineering** rolüne geçiş sürecimdeki tüm teorik notları, cheatsheet'leri ve hands-on uygulamaları içerir.
+Bu repo, Konfigürasyon Yönetim Uzmanlığı'ndan **Modern DevOps & Cloud Engineering** rolüne geçiş sürecimdeki tüm teorik notları, cheatsheet'leri ve hands-on uygulamaları içerir.
 
 > 💡 **Not:** Dokümantasyon, her gün yapılan pratikler ve otomasyon script'leri ile düzenli olarak güncellenmektedir.
 
@@ -91,3 +91,44 @@ echo "=========================================="
 chmod +x day-01/sys_check.sh
 ./day-01/sys_check.sh
 ```
+---
+
+## 📅 Day 2: Docker Engine Kurulumu & Container Yaşam Döngüsü
+
+> 🎯 **Günün Amacı:** Docker mimarisini anlamak, Ubuntu 24.04 (WSL2) üzerinde Docker Engine kurulumunu tamamlamak ve bir Nginx container'ının tüm yaşam döngüsünü CLI üzerinden yönetmek.
+
+### 📚 Özet Ders Notu
+
+* **Sanal Makine vs Container:** Sanal makineler ayrı işletim sistemleri (Guest OS) çalıştırarak donanım seviyesinde sanallaştırma yaparken, Container'lar Host işletim sisteminin çekirdeğini (Kernel) paylaşarak işletim sistemi seviyesinde izolasyon sağlar.
+* **İmaj vs Container:** Image, uygulamanın çalışması için gereken tüm dosyaların salt-okunur (read-only) paket halidir. Container ise bu imajın bellekte çalışan (read-write katmanına sahip) canlı örneğidir.
+
+---
+
+### 🛠️ Quick Cheatsheet: Temel Docker Komutları
+
+| Komut | Açıklama |
+| :--- | :--- |
+| `docker run -d -p 8080:80 --name web nginx` | Nginx imajından `web` adında, arka planda çalışan container oluşturur. |
+| `docker ps` | Sadece aktif çalışan container'ları listeler. |
+| `docker ps -a` | Durdurulmuş olanlar dahil tüm container'ları gösterir. |
+| `docker logs -f web` | Container loglarını canlı olarak terminale basar. |
+| `docker exec -it web bash` | Container içerisinde Shell oturumu açar. |
+| `docker rm -f web` | Container'ı durdurur ve sistemden kaldırır. |
+
+---
+
+### 🧪 Hands-On Lab: Nginx Web Sunucusu Dağıtımı
+
+1. **Docker Kurulum Sonu Testi:**
+   ```bash
+   docker run hello-world
+   ```
+2. **Nginx Container Çalıştırma & Doğrulama:**
+   ```bash
+   docker run -d --name my-web-server -p 8080:80 nginx
+   curl -I http://localhost:8080
+   ```
+3. **Temizlik:**
+   ```bash
+   docker stop my-web-server && docker rm my-web-server
+   ```
