@@ -1,6 +1,6 @@
 # 🚀 DevOps Yolculuğu: 0'dan Cloud & Kubernetes'e
 
-Bu repo, Konfigürasyon Yönetim Uzmanlığı'ndan **Modern DevOps & Cloud Engineering** rolüne geçiş sürecimdeki tüm teorik notları, cheatsheet'leri ve hands-on uygulamaları içerir.
+Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'leri ve hands-on uygulamaları içerir.
 
 > 💡 **Not:** Dokümantasyon, her gün yapılan pratikler ve otomasyon script'leri ile düzenli olarak güncellenmektedir.
 
