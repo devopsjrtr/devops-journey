@@ -184,3 +184,49 @@ chmod +x day-01/sys_check.sh
    # Test et
    curl http://localhost:5001
    ```
+
+---
+
+## 📅 Day 4: Port Mapping & Container Networking
+
+> 🎯 **Günün Amacı:** Container port yönlendirmesini anlamak, Docker ağ tiplerini incelemek ve özel bir bridge ağı (User-Defined Bridge) üzerinde App-Database container iletişimini sağlamak.
+
+### 📚 Özet Ders Notu
+
+* **Port Mapping (`-p HOST:CONTAINER`):** Container'ın dış dünyaya kapatılmış portunu, Host işletim sisteminin belirli bir portuna bağlayarak dış erişime açar.
+* **Varsayılan Bridge vs Özel Bridge:** Varsayılan `bridge` ağında container'lar birbirini sadece IP adresi üzerinden bulabilir. `docker network create` ile oluşturulan **Özel Bridge** ağlarında ise gömülü Docker DNS sunucusu sayesinde container'lar **birbirlerine isimleriyle (Container Name)** ulaşabilir.
+
+---
+
+### 🛠️ Quick Cheatsheet: Docker Network Komutları
+
+| Komut | Açıklama |
+| :--- | :--- |
+| `docker network ls` | Mevcut ağları gösterir. |
+| `docker network create <net-name>` | Özel bir izolasyon ağı oluşturur. |
+| `docker run --net <net-name>` | Container'ı belirtilen ağda başlatır. |
+| `docker network inspect <net-name>` | Ağdaki bağlı cihazları ve IP dağılımlarını listeler. |
+
+---
+
+### 🧪 Hands-On Lab: Python Web App + Redis DB İletişimi
+
+1. **Özel Ağ Oluşturma & Redis Ayağa Kaldırma:**
+   ```bash
+   docker network create devops-net
+   docker run -d --name redis-db --net devops-net redis:alpine
+   ```
+
+2. **Web Uygulamasını Bağlama & Test:**
+   ```bash
+   docker build -t counter-app:v1 .
+   docker run -d --name web-app --net devops-net -p 8081:5000 counter-app:v1
+   
+   # Test (Sayaç her cURL isteğinde artar)
+   curl http://localhost:8081
+   ```
+
+3. **DNS İletişim Doğrulaması:**
+   ```bash
+   docker exec -it web-app ping -c 2 redis-db
+   ```
