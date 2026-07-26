@@ -12,7 +12,7 @@ Bu repo, Konfigürasyon Yönetim Uzmanlığı'ndan **Modern DevOps & Cloud Engin
   - [x] Day 1: Linux Sistem Yönetimi, Yetkilendirme & Monitoring Scripti
   - [x] Day 2: Docker Engine Kurulumu & Container Yaşam Döngüsü
   - [x] Day 3: Dockerfile Yazımı, Multi-Stage Build Mantığı
-  - [ ] Day 4: Port Mapping & Container Networking
+  - [x] Day 4: Port Mapping & Container Networking
   - [ ] Day 5: Docker Volume & Persistence Structure
 - [ ] **Aşama 2: CI/CD Pipeline Otomasyonu (Jenkins & SonarQube)**
 - [ ] **Aşama 3: Infrastructure as Code (Terraform & Ansible)**
