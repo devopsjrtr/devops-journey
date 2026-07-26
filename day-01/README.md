@@ -13,7 +13,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [x] Day 2: Docker Engine Kurulumu & Container Yaşam Döngüsü
   - [x] Day 3: Dockerfile Yazımı, Multi-Stage Build Mantığı
   - [x] Day 4: Port Mapping & Container Networking
-  - [ ] Day 5: Docker Volume & Persistence Structure
+  - [x] Day 5: Docker Volume & Persistence Structure
 - [ ] **Aşama 2: CI/CD Pipeline Otomasyonu (Jenkins & SonarQube)**
 - [ ] **Aşama 3: Infrastructure as Code (Terraform & Ansible)**
 - [ ] **Aşama 4: Orchestration (Kubernetes & Helm)**
@@ -229,4 +229,67 @@ chmod +x day-01/sys_check.sh
 3. **DNS İletişim Doğrulaması:**
    ```bash
    docker exec -it web-app ping -c 2 redis-db
+   ```
+
+---
+
+## 📅 Day 5: Docker Volume & State Persistence
+
+> 🎯 **Günün Amacı:** Container'ların durumsuz (stateless) yapısını kavrayarak, uygulama verilerini veya loglarını Named Volume mekanizması ile container yaşam döngüsünden bağımsız hale getirmek.
+
+### 📚 Özet Ders Notu
+
+* **Ephemeral Nature:** Container'lar geçicidir. `docker rm` komutu çalıştırıldığında container içindeki katmanlarda oluşan tüm veriler kaybolur.
+* **Named Volumes:** Docker daemon tarafından yönetilen, silinmeyen ve container'lar arası veri paylaşımını sağlayan en güvenli kalıcı depolama yöntemidir.
+
+#### 💡 Arka Planda Ne Oluyor?
+
+`-v app-log-data:/app/logs` komutunu çalıştırdığında Docker aslında şunu yapar:
+
+1. Linux işletim sisteminde (WSL2 / Ubuntu içerisinde) varsayılan olarak `/var/lib/docker/volumes/app-log-data/_data` şeklinde fiziksel bir klasör oluşturur.
+2. Container başlatılırken, container içindeki `/app/logs` dizinini Linux makinandaki bu `_data` dizinine **bağlar (mount eder)**.
+
+**Dolayısıyla;**
+* Container içerisinde uygulama `/app/logs/access.log` dosyasına yeni bir satır yazdığında, o dosya anında ve eş zamanlı olarak senin Linux sunucundaki bu fiziksel klasörün içine yazılır.
+* Sen `docker rm -f container_adi` diyerek container'ı tamamen silsen dahi, dosya senin Linux makinenin diskinde (`/var/lib/docker/volumes/...`) kalmaya devam eder.
+* Yeni bir container açıp aynı volume'u bağladığında, yeni container da doğası gereği bu fiziksel klasörü okumaya başladığı için tüm eski logları hazırda bulur.
+
+---
+
+### 🛠️ Quick Cheatsheet: Volume Komutları
+
+| Komut | Açıklama |
+| :--- | :--- |
+| `docker volume ls` | Sistemdeki tüm volume'ları listeler. |
+| `docker volume create <vol-name>` | Yeni kalıcı alan oluşturur. |
+| `docker run -v <vol-name>:<container-path>` | Volume'u container içindeki dizine bağlar. |
+| `docker volume inspect <vol-name>` | Volume fiziki konumunu ve bağlamalarını gösterir. |
+
+---
+
+### 🧪 Hands-On Lab: Log Persistence Testi
+
+1. **Named Volume Oluşturma & Container Başlatma:**
+   ```bash
+   docker volume create app-log-data
+   docker run -d --name my-logger -p 8082:5000 -v app-log-data:/app/logs logger-app:v1
+   curl http://localhost:8082
+   ```
+
+2. **Container Silme & Veri Kalıcılığı Doğrulaması:**
+   ```bash
+   # Container siliniyor
+   docker rm -f my-logger
+   
+   # Yeni container aynı volume ile ayağa kaldırılıyor
+   docker run -d --name my-logger-new -p 8082:5000 -v app-log-data:/app/logs logger-app:v1
+   
+   # Eski verilerin korunduğu doğrulanıyor
+   curl http://localhost:8082
+   ```
+
+3. **Diskteki Fiziksel Konum Doğrulaması:**
+   ```bash
+   docker volume inspect app-log-data --format '{{ .Mountpoint }}'
+   sudo ls -l /var/lib/docker/volumes/app-log-data/_data
    ```
