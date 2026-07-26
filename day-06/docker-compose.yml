@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "8085:5000"
+    environment:
+      - REDIS_HOST=redis
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:
