@@ -14,6 +14,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [x] Day 3: Dockerfile Yazımı, Multi-Stage Build Mantığı
   - [x] Day 4: Port Mapping & Container Networking
   - [x] Day 5: Docker Volume & Persistence Structure
+  - [x] Day 6: Docker Compose & Compose Yaml Oluşturma
 - [ ] **Aşama 2: CI/CD Pipeline Otomasyonu (Jenkins & SonarQube)**
 - [ ] **Aşama 3: Infrastructure as Code (Terraform & Ansible)**
 - [ ] **Aşama 4: Orchestration (Kubernetes & Helm)**
@@ -292,4 +293,72 @@ chmod +x day-01/sys_check.sh
    ```bash
    docker volume inspect app-log-data --format '{{ .Mountpoint }}'
    sudo ls -l /var/lib/docker/volumes/app-log-data/_data
+   ```
+
+---
+
+## 📅 Day 6: Docker Compose Temelleri & Multi-Container Mimari
+
+> 🎯 **Günün Amacı:** `docker-compose.yml` bildirimsel (declarative) dosya formatını öğrenmek; web uygulaması, veritabanı ve kalıcı volume yapısını tek bir komutla orkestre etmeyi pratik etmek.
+
+### 📚 Özet Ders Notu
+
+* **Neden Docker Compose?:** Üretim ortamlarında veya karmaşık sistemlerde onlarca container'ı tek tek `docker run` komutuyla yönetmek yerine, tüm servisleri tek bir `docker-compose.yml` dosyasında tanımlayarak yönetmeyi sağlar.
+* **Otomatik Networking:** Compose, dosya içinde tanımlanan tüm servisleri otomatik olarak varsayılan bir izolasyon ağına alır. Servisler birbirlerine IP adresleri yerine servis adlarıyla (`web`, `redis` vb.) ulaşabilir.
+* **Bağımlılık Yönetimi (`depends_on`):** Servislerin başlangıç sırasını belirleyerek veritabanı hazır olmadan web uygulamasının ayağa kalkmasını engeller.
+
+---
+
+### 🛠️ Quick Cheatsheet: Docker Compose Komutları
+
+| Komut | Açıklama |
+| :--- | :--- |
+| `docker compose up -d` | `docker-compose.yml` içindeki tüm servisleri build edip arka planda çalıştırır. |
+| `docker compose ps` | Compose ile yönetilen aktif servislerin durumunu listeler. |
+| `docker compose logs -f <service_name>` | Belirtilen servisin canlı log akışını takip eder. |
+| `docker compose down` | Tüm servisleri ve oluşturulan ağları durdurup temizler. |
+| `docker compose down -v` | Servislerle birlikte tanımlı volume'ları da tamamen siler. |
+
+---
+
+### 🧪 Hands-On Lab: Python Web App + Redis DB + Volume Orchestration
+
+1. **`docker-compose.yml` Yapılandırması:**
+   ```yaml
+   version: '3.8'
+
+   services:
+     web:
+       build: .
+       ports:
+         - "8085:5000"
+       environment:
+         - REDIS_HOST=redis
+       depends_on:
+         - redis
+
+     redis:
+       image: redis:alpine
+       ports:
+         - "6379:6379"
+       volumes:
+         - redis-data:/data
+
+   volumes:
+     redis-data:
+   ```
+
+2. **Orkestrasyon & Doğrulama Komutları:**
+   ```bash
+   # Sistemleri ayağa kaldır
+   docker compose up -d
+
+   # Durum kontrolü
+   docker compose ps
+
+   # Test (Sayaç doğrulaması)
+   curl http://localhost:8085
+
+   # Temizlik
+   docker compose down
    ```
