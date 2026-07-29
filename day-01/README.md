@@ -15,7 +15,9 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [x] Day 4: Port Mapping & Container Networking
   - [x] Day 5: Docker Volume & Persistence Structure
   - [x] Day 6: Docker Compose & Compose Yaml Oluşturma
-- [ ] **Aşama 2: CI/CD Pipeline Otomasyonu (Jenkins & SonarQube)**
+- [x] **Aşama 2: CI/CD Pipeline Otomasyonu (Jenkins & SonarQube)**
+  - [x] Day 7: Docker Container'a Jenkins & SonarQube Kurulumu
+  - [ ] Day 8: Jenkins & SonarQube İletişimini Kurma ve Pipeline Oluşturma
 - [ ] **Aşama 3: Infrastructure as Code (Terraform & Ansible)**
 - [ ] **Aşama 4: Orchestration (Kubernetes & Helm)**
 
@@ -361,4 +363,87 @@ chmod +x day-01/sys_check.sh
 
    # Temizlik
    docker compose down
+   ```
+
+   ---
+
+## 📅 Day 7: Local CI/CD Lab Ortamı Kurulumu (Jenkins & SonarQube)
+
+> 🎯 **Günün Amacı:** Docker Compose ile Jenkins, SonarQube ve PostgreSQL servislerini içeren izole bir yerel CI/CD lab ortamı kurmak.
+
+### 📚 Özet Ders Notu
+
+* **Docker Socket Mounting:** Jenkins container'ının içinde uygulama imajları build edebilmek için Host makinenin `/var/run/docker.sock` dosyası container içine mount edilir.
+* **SonarQube & PostgreSQL:** SonarQube analiz sonuçlarını kalıcı olarak saklamak için arkada PostgreSQL veritabanına ihtiyaç duyar.
+
+---
+
+### 🛠️ Quick Cheatsheet: CI/CD Hazırlık Komutları
+
+| Komut / İşlem | Açıklama |
+| :--- | :--- |
+| `sudo sysctl -w vm.max_map_count=262144` | SonarQube (Elasticsearch) için bellek limitini düzenler. |
+| `docker exec -it jenkins cat ...` | Jenkins ilk kurulum şifresini (`initialAdminPassword`) getirir. |
+
+---
+
+### 🧪 Hands-On Lab: Docker Compose ile CI/CD Stack
+
+1. **`docker-compose.yml` Konfigürasyonu:**
+   ```yaml
+   version: '3.8'
+
+   services:
+     jenkins:
+       image: jenkins/jenkins:lts-jdk17
+       container_name: jenkins
+       user: root
+       ports:
+         - "8080:8080"
+       volumes:
+         - jenkins-data:/var/jenkins_home
+         - /var/run/docker.sock:/var/run/docker.sock
+       networks:
+         - cicd-net
+
+     sonarqube:
+       image: sonarqube:community
+       container_name: sonarqube
+       ports:
+         - "9000:9000"
+       environment:
+         - SONAR_JDBC_USERNAME=sonar
+         - SONAR_JDBC_PASSWORD=sonar
+         - SONAR_JDBC_URL=jdbc:postgresql://db:5432/sonar
+       depends_on:
+         - db
+       networks:
+         - cicd-net
+
+     db:
+       image: postgres:15
+       container_name: postgres-sonar
+       environment:
+         - POSTGRES_USER=sonar
+         - POSTGRES_PASSWORD=sonar
+         - POSTGRES_DB=sonar
+       volumes:
+         - postgres-data:/var/lib/postgresql/data
+       networks:
+         - cicd-net
+
+   volumes:
+     jenkins-data:
+     sonarqube-data:
+     postgres-data:
+
+   networks:
+     cicd-net:
+       name: cicd-net
+   ```
+
+2. **Ayağa Kaldırma & Şifre Alma:**
+   ```bash
+   docker compose up -d
+   docker exec -it jenkins cat /var/jenkins_home/secrets/initialAdminPassword
    ```
