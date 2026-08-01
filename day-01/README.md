@@ -18,6 +18,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
 - [x] **Aşama 2: CI/CD Pipeline Otomasyonu (Jenkins & SonarQube)**
   - [x] Day 7: Docker Container'a Jenkins & SonarQube Kurulumu
   - [X] Day 8: Jenkins & SonarQube İletişimini Kurma ve Pipeline Oluşturma
+  - [X] Day 8-2: Dosyaların Github'dan alındığı Pipeline Senaryosu
 - [ ] **Aşama 3: Infrastructure as Code (Terraform & Ansible)**
 - [ ] **Aşama 4: Orchestration (Kubernetes & Helm)**
 
@@ -509,3 +510,124 @@ Bu günü tamamlarken gerçek dünya CI/CD pipeline süreçlerinde çok sık kar
 - Kodların dinamik olarak CI/CD ortamında üretilebilmesi ve bağımlılıkların hatasız yönetilmesi sağlandı.
 - SonarQube CLI konteynerinin geçici olarak tetiklenip kodları analiz ettikten sonra kendini imha etmesi (`--rm`) başarıyla uygulandı.
 - Statik Kod Analizi ve Docker Build adımları uçtan uca otomatikleştirildi.
+
+# 🚀 Day 8-2: Dosyaların Github'dan alındığı Pipeline Senaryosu
+
+## 📄 Alternatif Senaryo: GitHub SCM Tabanlı Jenkinsfile
+
+Dosyaları pipeline içinde dinamik olarak üretmek yerine doğrudan bir **GitHub deposundan (SCM)** çektiğimiz ve **Docker-in-Docker (DinD)** ortamında SonarQube analizi yaptığımız alternatif ve üretime hazır `Jenkinsfile` yapılandırması aşağıdadır:
+
+```groovy
+pipeline {
+    agent any
+
+    environment {
+        APP_NAME = 'python-flask-app'
+        DOCKER_IMAGE = 'my-python-app:latest'
+        // GitHub reposu içindeki projenin bulunduğu alt klasör yolu
+        WORK_DIR = 'day-08/git-stored-version' 
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo "Kod GitHub deposundan çekildi."
+                sh 'ls -la'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                script {
+                    dir("${WORK_DIR}") {
+                        withCredentials([string(credentialsId: 'sonar-token', variable: 'MY_SONAR_TOKEN')]) {
+                            echo 'SonarQube Statik Kod Analizi Başlatılıyor...'
+                            
+                            sh 'chmod -R 777 .'
+                            
+                            // DİKKAT: Docker-in-Docker ortamında volume çakışmasını önlemek için
+                            // -v yerine "--volumes-from jenkins" kullanılmıştır.
+                            sh """
+                                docker run --rm \
+                                  --net cicd-net \
+                                  -e SONAR_TOKEN="\${MY_SONAR_TOKEN}" \
+                                  --volumes-from jenkins \
+                                  -w \${WORKSPACE}/${WORK_DIR} \
+                                  sonarsource/sonar-scanner-cli \
+                                  -Dsonar.host.url=http://sonarqube:9000 \
+                                  -Dsonar.projectKey=${APP_NAME} \
+                                  -Dsonar.sources=.
+                            """
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                dir("${WORK_DIR}") {
+                    echo 'Docker İmajı Build Ediliyor...'
+                    sh 'docker build -t ${DOCKER_IMAGE} .'
+                }
+            }
+        }
+
+        stage('Test & Verify') {
+            steps {
+                echo 'Uygulama İmajı Doğrulanıyor...'
+                sh 'docker images | grep my-python-app'
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Pipeline tamamlandı.'
+        }
+        success {
+            echo 'Tebrikler! Kod GitHub depodan alındı, analiz edildi ve build başarılı.'
+        }
+        failure {
+            echo 'Hata! Pipeline bir adımda başarısız oldu.'
+        }
+    }
+}
+```
+
+## 🛠️ Karşılaşılan Kritik Hatalar ve Çözüm Rehberi (Troubleshooting)
+
+Bu günü tamamlarken gerçek dünya CI/CD pipeline süreçlerinde çok sık karşılaşılan hataları deneyimledik ve çözdük. İlerideki projeler için referans notlar:
+
+### 1. `No such property: SONAR_TOKEN for class: groovy.lang.Binding` Hatası
+- **Hatanın Nedeni:** Jenkins Pipeline ortamında bash çift tırnak (`"""`) içinde `${SONAR_TOKEN}` kullanıldığında, Groovy bunu kendi değişkeni sanıp çözümlemeye çalışır; bulamayınca pipeline patlar.
+- **Çözüm:** Groovy'nin bu değişkeni bash ortamına bırakması için ters bölü (`\`) ile escape edildi: `\${SONAR_TOKEN}` (veya direkt `withCredentials` ile bash değişkenine aktarıldı).
+
+### 2. `failed to read dockerfile: open Dockerfile: no such file or directory` Hatası
+- **Hatanın Nedeni:** Jenkins, bir Docker container'ı içinde yalıtılmış (isolated) bir ortamda çalıştığı için host makinedeki (örneğin WSL2 terminalinde elle oluşturduğumuz) yerel dosyaları göremez; sadece kendi volume alanı olan `${WORKSPACE}` dizinine bakar.
+- **Çözüm:** `Jenkinsfile` içerisindeki ilk aşamada projenin ihtiyaç duyduğu dosyalar doğrudan Jenkins'in workspace dizinine yazdırıldı veya GitHub üzerinden `dir("${WORK_DIR}")` bloğu ile doğru klasör konumu hedeflendi.
+
+### 3. `script.sh.copy: docker: not found` Hatası
+- **Hatanın Nedeni:** `jenkins/jenkins:lts` resmi imajının içinde varsayılan olarak Docker CLI aracı bulunmaz.
+- **Çözüm:** Container içinden host makinenin Docker socket'ine (`/var/run/docker.sock`) bağlanabilmesi için imaj içine `docker.io` paketi kuruldu.
+
+### 4. SonarQube `WARN: Unable to locate 'report-task.txt'` veya Stage'de X Çıkması
+- **Hatanın Nedeni:** Docker ile koşan `sonar-scanner-cli` aracı raporu üretip workspace içine yazmaya çalışırken Jenkins dizin izinlerine takılabilir.
+- **Çözüm:** Pipeline'da tarama öncesi `sh 'chmod -R 777 .'` verilerek yazma/okuma izinleri garantiye alındı.
+
+### 5. Bash Script İçinde Yorum Satırından Sonra Command Not Found (Exit code 127)
+- **Hatanın Nedeni:** `sh """ docker run ... \ # açıklama \ -Dsonar... """` şeklinde ters slash (`\`) ile alt satıra bağlanan komutların arasına `#` ile yorum yazmak Bash komut zincirini kırar.
+- **Çözüm:** Tüm açıklamalar ve yorum satırları bash komut bloğunun içine değil, hemen **üstüne** taşınarak sözdizimi temizlendi.
+
+### 6. Docker-in-Docker (DinD) ve Named Volume Tuzağı (`0 files indexed` Sorunu)
+- **Hatanın Nedeni:** Jenkins bir container olarak çalışırken (`jenkins-home` adında bir Named Volume kullanırken), pipeline içinde `docker run -v ${WORKSPACE}:/usr/src` komutu çalıştırıldığında bu emri Jenkins container'ı değil, `/var/run/docker.sock` üzerinden Host makinedeki Docker Daemon işletir. Host makine kendi Linux dosya sisteminde `/var/jenkins_home/...` yolunu arayıp bulamadığı için oraya **bomboş, sıfır baytlık yeni bir klasör açıp** SonarQube container'ına bağlar. Bu nedenle SonarScanner bomboş klasörü tarar ve sürekli `0 files indexed` (0 dosya indekslendi) hatası verir.
+- **Çözüm:** Host dosya yollarını eşlemek yerine Docker'ın **`--volumes-from jenkins`** parametresi kullanılarak, Jenkins container'ına bağlı olan `jenkins-home` named volume'ü doğrudan SonarScanner container'ına aktarıldı. Çalışma dizini ise **`-w ${WORKSPACE}/${WORK_DIR}`** parametresi ile belirtilerek dosya okuma sorunu kökten çözüldü.
+
+---
+
+## 🎯 Günün Sonucu & Kazanımlar
+
+- Docker içinde çalışan Jenkins'ten host makine üzerindeki Docker daemon'ın yönetimi öğrenildi (Docker-in-Docker / Socket Binding).
+- Docker-in-Docker mimarilerinde Named Volume paylaşımı (`--volumes-from`) ve çalışma dizini hedeflemesi (`-w`) uygulamalı olarak tecrübe edildi.
+- SonarQube CLI konteynerinin geçici olarak tetiklenip kodları analiz ettikten sonra kendini imha etmesi (`--rm`) başarıyla uygulandı.
+- Statik Kod Analizi ve Docker Build adımları hem dinamik hem de GitHub SCM tabanlı senaryolarda uçtan uca otomatikleştirildi.
