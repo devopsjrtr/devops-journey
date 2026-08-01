@@ -25,25 +25,26 @@ pipeline {
                             
                             sh 'chmod -R 777 .'
                             
+                            // 1. WORKSPACE'in tamamını bağlıyoruz ki .git klasörü okunsun.
+                            // 2. projectBaseDir ile doğru alt klasörü gösteriyoruz.
+                            // 3. scm.disabled=true parametresini siliyoruz.
                             sh """
                                 docker run --rm \
                                   --net cicd-net \
                                   -e SONAR_TOKEN="\${MY_SONAR_TOKEN}" \
-                                  -v \$(pwd):/usr/src \
+                                  -v \${WORKSPACE}:/usr/src \
                                   sonarsource/sonar-scanner-cli \
                                   -Dsonar.host.url=http://sonarqube:9000 \
                                   -Dsonar.projectKey=${APP_NAME} \
-                                  -Dsonar.sources=/usr/src \
-                                  -Dsonar.inclusions=**/*.py,**/*.txt,**/Dockerfile \
-                                  -Dsonar.sourceEncoding=UTF-8 \
-                                  -Dsonar.scm.disabled=true
+                                  -Dsonar.projectBaseDir=/usr/src/${WORK_DIR} \
+                                  -Dsonar.sources=.
                             """
                         }
                     }
                 }
             }
         }
-
+        
         stage('Build Docker Image') {
             steps {
                 // Docker build komutunu da ilgili klasörün içinde çalıştırıyoruz
