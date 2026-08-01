@@ -1,0 +1,94 @@
+pipeline {
+    agent any
+
+    environment {
+        APP_NAME = 'python-flask-app'
+        DOCKER_IMAGE = 'my-python-app:latest'
+        // Dosyalarının bulunduğu alt klasör yolu
+        WORK_DIR = 'day-08/git-stored-version' 
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo "Kod GitHub deposundan çekildi."
+                sh 'ls -la'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                script {
+                    dir("${WORK_DIR}") {
+                        withCredentials([string(credentialsId: 'sonar-token', variable: 'MY_SONAR_TOKEN')]) {
+                            echo 'SonarQube Statik Kod Analizi Başlatılıyor...'
+                            
+                            sh 'chmod -R 777 .'
+                            
+                            // DİKKAT:
+                            // 1. -v yerine "--volumes-from jenkins" kullanıyoruz. Böylece Jenkins'in volume alanı aynen aktarılıyor.
+                            // 2. -w ile Scanner'ın doğrudan doğru workspace alt klasöründe çalışmasını sağlıyoruz.
+                            sh """
+                                docker run --rm \
+                                  --net cicd-net \
+                                  -e SONAR_TOKEN="\${MY_SONAR_TOKEN}" \
+                                  --volumes-from jenkins \
+                                  -w \${WORKSPACE}/${WORK_DIR} \
+                                  sonarsource/sonar-scanner-cli \
+                                  -Dsonar.host.url=http://sonarqube:9000 \
+                                  -Dsonar.projectKey=${APP_NAME} \
+                                  -Dsonar.sources=.
+                            """
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                // Docker build komutunu da ilgili klasörün içinde çalıştırıyoruz
+                dir("${WORK_DIR}") {
+                    echo 'Docker İmajı Build Ediliyor...'
+                    sh 'docker build -t ${DOCKER_IMAGE} .'
+                }
+            }
+        }
+
+        stage('Test & Verify') {
+            steps {
+                echo 'Uygulama İmajı Doğrulanıyor...'
+                sh 'docker images | grep my-python-app'
+            }
+        }
+    }
+
+	stage('Push Docker Image to Nexus') {
+            steps {
+                echo 'Docker İmajı Nexus Repository Manager adresine yükleniyor...'
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                        sh """
+                            echo "Nexus'a login olunuyor..."
+                            docker login -u \${NEXUS_USER} -p \${NEXUS_PASS} localhost:8083
+                            
+                            echo "İmaj Nexus'a pushlanıyor..."
+                            docker push localhost:8083/my-python-app:latest
+                        """
+                    }
+                }
+            }
+        }
+
+    post {
+        always {
+            echo 'Pipeline tamamlandı.'
+        }
+        success {
+            echo 'Tebrikler! Kod GitHub depodan alındı, analiz edildi ve build başarılı.'
+        }
+        failure {
+            echo 'Hata! Pipeline bir adımda başarısız oldu.'
+        }
+    }
+}
