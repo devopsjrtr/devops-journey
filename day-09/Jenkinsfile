@@ -54,15 +54,7 @@ pipeline {
                 }
             }
         }
-
-        stage('Test & Verify') {
-            steps {
-                echo 'Uygulama İmajı Doğrulanıyor...'
-                sh 'docker images | grep my-python-app'
-            }
-        }
-    }
-
+		
 		stage('Push Docker Image to Nexus') {
             steps {
                 echo 'Docker İmajı Nexus Repository Manager adresine yükleniyor...'
@@ -78,7 +70,17 @@ pipeline {
                     }
                 }
             }
+        }		
+		
+        stage('Test & Verify') {
+            steps {
+                echo 'Uygulama İmajı Doğrulanıyor...'
+                sh 'docker images | grep my-python-app'
+            }
         }
+    }
+
+	   
 
     post {
         always {
