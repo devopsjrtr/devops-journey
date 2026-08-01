@@ -17,7 +17,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [x] Day 6: Docker Compose & Compose Yaml Oluşturma
 - [x] **Aşama 2: CI/CD Pipeline Otomasyonu (Jenkins & SonarQube)**
   - [x] Day 7: Docker Container'a Jenkins & SonarQube Kurulumu
-  - [ ] Day 8: Jenkins & SonarQube İletişimini Kurma ve Pipeline Oluşturma
+  - [X] Day 8: Jenkins & SonarQube İletişimini Kurma ve Pipeline Oluşturma
 - [ ] **Aşama 3: Infrastructure as Code (Terraform & Ansible)**
 - [ ] **Aşama 4: Orchestration (Kubernetes & Helm)**
 
@@ -447,3 +447,65 @@ chmod +x day-01/sys_check.sh
    docker compose up -d
    docker exec -it jenkins cat /var/jenkins_home/secrets/initialAdminPassword
    ```
+
+# 🚀 Day 8: Jenkins & SonarQube Entegrasyonu ve Dinamik Docker Deployment
+
+Bu laboratuvar çalışmasında, **Jenkins Pipeline** üzerinden uygulama dosyalarını dinamik olarak oluşturan, **SonarQube Statik Kod Analizi** gerçekleştiren ve analiz başarıyla tamamlandıktan sonra uygulamanın **Docker İmajını** derleyip doğrulayan tam kapsamlı bir CI/CD boru hattı (pipeline) inşa edilmiştir.
+
+---
+
+## 📁 Proje Dosya Yapısı
+
+- `app.py`: Pipeline tarafından dinamik oluşturulan Python (Flask) web uygulaması
+- `requirements.txt`: Projenin Python bağımlılıkları (`flask==3.0.0`)
+- `Dockerfile`: Uygulamanın container imaj konfigürasyonu
+- `Jenkinsfile`: Tüm CI/CD aşamalarını ve dosya üretimini tanımlayan Groovy pipeline
+- `README.md`: Dokümantasyon ve hata çözüm rehberi
+
+---
+
+## 🔄 Pipeline Aşamaları (Stages)
+
+1. **Checkout (Dinamik Dosya Üretimi):** Bir SCM/Git entegrasyonu kullanılmadığı için, pipeline ilk aşamada Jenkins çalışma alanı (`${WORKSPACE}`) içerisinde `app.py`, `requirements.txt` ve `Dockerfile` dosyalarını `cat << 'EOF'` bash komutlarıyla yerel olarak oluşturur.
+2. **SonarQube Analysis:** `sonarsource/sonar-scanner-cli` Docker imajı kullanılarak statik kod analizi yapılır. Dinamik oluşturulan yerel workspace dizini container içine haritalandırılır; SCM taraması devre dışı bırakılarak kod analizi tamamlanır.
+3. **Build Docker Image:** Analizden başarıyla geçen projenin `my-python-app:latest` adıyla Docker imajı oluşturulur.
+4. **Test & Verify:** İmajın sistemde başarıyla derlendiği doğrulanır (`docker images | grep my-python-app`).
+5. **Post Actions:** Pipeline başarı/başarısızlık durumlarına göre bilgilendirme logları üretir.
+
+---
+
+## 🛠️ Karşılaşılan Kritik Hatalar ve Çözüm Rehberi (Troubleshooting)
+
+Bu günü tamamlarken gerçek dünya CI/CD pipeline süreçlerinde çok sık karşılaşılan hataları deneyimledik ve çözdük. İlerideki projeler için referans notlar:
+
+### 1. `No such property: SONAR_TOKEN for class: groovy.lang.Binding` Hatası
+- **Hatanın Nedeni:** Jenkins Pipeline ortamında bash çift tırnak (`"""`) içinde `${SONAR_TOKEN}` kullanıldığında, Groovy bunu kendi değişkeni sanıp çözümlemeye çalışır; bulamayınca pipeline patlar.
+- **Çözüm:** Groovy'nin bu değişkeni bash ortamına bırakması için ters bölü (`\`) ile escape edildi: `\${SONAR_TOKEN}` (veya direkt `withCredentials` ile bash değişkenine aktarıldı).
+
+### 2. `failed to read dockerfile: open Dockerfile: no such file or directory` Hatası
+- **Hatanın Nedeni:** Jenkins, bir Docker container'ı içinde yalıtılmış (isolated) bir ortamda çalıştığı için host makinedeki (örneğin WSL2 terminalinde elle oluşturduğumuz) yerel dosyaları göremez; sadece kendi volume alanı olan `${WORKSPACE}` dizinine bakar.
+- **Çözüm:** `Jenkinsfile` içerisindeki ilk aşamada (`Checkout`), projenin ihtiyaç duyduğu `app.py`, `requirements.txt` ve `Dockerfile` dosyaları dinamik olarak doğrudan Jenkins'in workspace dizini içerisine yazdırıldı.
+
+### 3. `script.sh.copy: docker: not found` Hatası
+- **Hatanın Nedeni:** `jenkins/jenkins:lts` resmi imajının içinde varsayılan olarak Docker CLI aracı bulunmaz.
+- **Çözüm:** Container içinden host makinenin Docker socket'ine (`/var/run/docker.sock`) bağlanabilmesi için imaj içine `docker.io` paketi kuruldu (veya özel `Dockerfile.jenkins` ile imaj derlendi).
+
+### 4. SonarQube `WARN: Unable to locate 'report-task.txt'` veya Stage'de X Çıkması
+- **Hatanın Nedeni:** Docker ile koşan `sonar-scanner-cli` aracı raporu üretip workspace içine yazmaya çalışırken Jenkins dizin izinlerine takılabilir veya çalışma alanı haritalandırma eksikliğinden dolayı tarama hataları oluşabilir.
+- **Çözüm:** 
+  1. Pipeline'da tarama öncesi `sh 'chmod -R 777 .'` verilerek yazma/okuma izinleri garantiye alındı.
+  2. Scanner'a projenin doğru haritalanması için `-Dsonar.projectBaseDir=/usr/src` ve `-Dsonar.sources=.` parametreleri eklendi.
+  3. Proje bir Git reposundan çekilmeyip workspace içinde dinamik oluşturulduğu için SCM (Git) tarayıcısının hata vermesini engellemek adına `-Dsonar.scm.disabled=true` parametresi kullanıldı.
+
+### 5. Bash Script İçinde Yorum Satırından Sonra Command Not Found (Exit code 127)
+- **Hatanın Nedeni:** `sh """ docker run ... \ # açıklama \ -Dsonar... """` şeklinde ters slash (`\`) ile alt satıra bağlanan komutların arasına `#` ile yorum yazmak Bash komut zincirini kırar.
+- **Çözüm:** Tüm açıklamalar ve yorum satırları bash komut bloğunun içine değil, hemen **üstüne** taşınarak sözdizimi temizlendi.
+
+---
+
+## 🎯 Günün Sonucu & Kazanımlar
+
+- Docker içinde çalışan Jenkins'ten host makine üzerindeki Docker daemon'ın yönetimi öğrenildi (Docker-in-Docker / Socket Binding).
+- Kodların dinamik olarak CI/CD ortamında üretilebilmesi ve bağımlılıkların hatasız yönetilmesi sağlandı.
+- SonarQube CLI konteynerinin geçici olarak tetiklenip kodları analiz ettikten sonra kendini imha etmesi (`--rm`) başarıyla uygulandı.
+- Statik Kod Analizi ve Docker Build adımları uçtan uca otomatikleştirildi.
