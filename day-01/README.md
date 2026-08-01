@@ -631,3 +631,283 @@ Bu günü tamamlarken gerçek dünya CI/CD pipeline süreçlerinde çok sık kar
 - Docker-in-Docker mimarilerinde Named Volume paylaşımı (`--volumes-from`) ve çalışma dizini hedeflemesi (`-w`) uygulamalı olarak tecrübe edildi.
 - SonarQube CLI konteynerinin geçici olarak tetiklenip kodları analiz ettikten sonra kendini imha etmesi (`--rm`) başarıyla uygulandı.
 - Statik Kod Analizi ve Docker Build adımları hem dinamik hem de GitHub SCM tabanlı senaryolarda uçtan uca otomatikleştirildi.
+
+# 🚀 Gün 09: Jenkins Pipeline ile Nexus Repository Manager (Artifact Management)
+
+Bugün, DevOps mimarimizin en kritik parçalarından biri olan **Artifact Management (Paket Yönetimi)** adımını CI/CD altyapımıza entegre ettik. Endüstri standardı **Sonatype Nexus Repository Manager 3** servisini `docker-compose` altyapımıza dahil ettik, özel bir **Docker Hosted Repository (Özel Docker Deposu)** kurduk ve Jenkins Pipeline'ımızı derlenen Docker imajlarını otomatik olarak etiketleyip (`docker tag`) Nexus depomuza gönderecek (`docker push`) şekilde geliştirdik.
+
+---
+
+## 🎯 Günün Öğrenim Hedefleri ve Kazanımları
+
+1. **Artifact Repository Kavramı:** Derlenen uygulamaların (JAR, WAR, Docker İmajları vb.) sunuculara rastgele taşınmak yerine merkezi bir depoda versiyonlanarak saklanmasının önemi.
+2. **Nexus Repository Tipi Seçimi:** 
+   - `hosted`: Kendi derlediğimiz iç paketleri ve Docker imajlarını barındıran depo tipi.
+   - `proxy`: Dış kaynaklardan (Docker Hub vb.) çekilen paketleri önbelleğe alan ayna (mirror) depo tipi.
+   - `group`: Hosted ve Proxy depolarını tek URL altında birleştiren depo tipi.
+3. **Docker V2 Registry Entegrasyonu:** Nexus üzerinde HTTP portu (`8083`) açarak özel bir Docker Registry tanımlamak ve kimlik doğrulama ayarlarını yapılandırmak.
+4. **Pipeline Otomasyonu:** Jenkins üzerinden `withCredentials` bloğu ile Nexus kimlik doğrulaması yapmak, `docker tag` komutu ile imajı uzak depo formatına getirmek ve `docker push` ile yüklemek.
+
+---
+
+## 🏗️ Altyapı Mimarimizin Son Hali
+
+```text
+[ GitHub ] --(Checkout)--> [ Jenkins ] --(Statik Analiz)--> [ SonarQube ]
+                               |
+                        (Docker Build)
+                               |
+                        [ Local Image ]
+                               |
+                     (Docker Tag & Push)
+                               v
+               [ Nexus 3 (Docker Hosted Repo) ]
+                         (port: 8083)
+```
+
+## Güncellenmiş Altyapı Dosyaları
+
+1. docker-compose.yml
+Nexus servisi (8081 arayüz ve 8083 Docker Registry portları) ve veri sürekliliği için nexus-data volume tanımı eklendi:
+
+```yaml
+services:
+  jenkins:
+    image: jenkins/jenkins:lts-jdk17
+    container_name: jenkins
+    user: root
+    entrypoint: >
+      /bin/bash -c "
+      apt-get update && apt-get install -y docker.io &&
+      chmod 666 /var/run/docker.sock &&
+      /usr/bin/tini -- /usr/local/bin/jenkins.sh
+      "
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins-home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - cicd-net
+
+  sonarqube:
+    image: sonarqube:community
+    container_name: sonarqube
+    ports:
+      - "9000:9000"
+    environment:
+      - SONAR_JDBC_USERNAME=sonar
+      - SONAR_JDBC_PASSWORD=sonar
+      - SONAR_JDBC_URL=jdbc:postgresql://db:5432/sonar
+      - SONAR_SEARCH_JAVAADDITIONALOPTS=-Xmx512m -Xms512m
+    volumes:
+      - sonarqube-data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
+    depends_on:
+      - db
+    networks:
+      - cicd-net
+
+  db:
+    image: postgres:15
+    container_name: postgres-sonar
+    environment:
+      - POSTGRES_USER=sonar
+      - POSTGRES_PASSWORD=sonar
+      - POSTGRES_DB=sonar
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - cicd-net
+
+  nexus:
+    image: sonatype/nexus3:latest
+    container_name: nexus
+    ports:
+      - "8081:8081"
+      - "8083:8083" # Docker Hosted Repository (HTTP Port Connector)
+    volumes:
+      - nexus-data:/nexus-data
+    networks:
+      - cicd-net
+
+volumes:
+  jenkins-home:
+  sonarqube-data:
+  sonarqube_extensions:
+  sonarqube_logs:
+  postgres-data:
+  nexus-data:
+
+networks:
+  cicd-net:
+    name: cicd-net
+```
+
+2. Jenkinsfile
+Jenkins'in Nexus deposuna push yapabilmesi için Push Docker Image to Nexus aşaması, docker tag mantığı ve nexus-docker-creds kimlik bilgisi entegre edildi:
+
+```groovy
+pipeline {
+    agent any
+
+    environment {
+        APP_NAME = 'python-flask-app'
+        DOCKER_IMAGE = 'my-python-app:latest'
+        NEXUS_REGISTRY = 'localhost:8083'
+        WORK_DIR = 'day-08/git-stored-version' 
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo "Kod GitHub deposundan çekildi."
+                sh 'ls -la'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                script {
+                    dir("${WORK_DIR}") {
+                        withCredentials([string(credentialsId: 'sonar-token', variable: 'MY_SONAR_TOKEN')]) {
+                            echo 'SonarQube Statik Kod Analizi Başlatılıyor...'
+                            
+                            sh 'chmod -R 777 .'
+                            
+                            sh """
+                                docker run --rm \
+                                  --net cicd-net \
+                                  -e SONAR_TOKEN="\${MY_SONAR_TOKEN}" \
+                                  --volumes-from jenkins \
+                                  -w \${WORKSPACE}/${WORK_DIR} \
+                                  sonarsource/sonar-scanner-cli \
+                                  -Dsonar.host.url=http://sonarqube:9000 \
+                                  -Dsonar.projectKey=${APP_NAME} \
+                                  -Dsonar.sources=.
+                            """
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                dir("${WORK_DIR}") {
+                    echo 'Docker İmajı Build Ediliyor...'
+                    sh 'docker build -t ${DOCKER_IMAGE} .'
+                }
+            }
+        }
+
+        stage('Push Docker Image to Nexus') {
+            steps {
+                echo 'Docker İmajı Nexus Repository Manager adresine yükleniyor...'
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                        sh """
+                            echo "Nexus'a login olunuyor..."
+                            docker login -u \${NEXUS_USER} -p \${NEXUS_PASS} ${NEXUS_REGISTRY}
+                            
+                            echo "İmaj Nexus formatında etiketleniyor..."
+                            docker tag ${DOCKER_IMAGE} ${NEXUS_REGISTRY}/${DOCKER_IMAGE}
+                            
+                            echo "İmaj Nexus'a pushlanıyor..."
+                            docker push ${NEXUS_REGISTRY}/${DOCKER_IMAGE}
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Test & Verify') {
+            steps {
+                echo 'Uygulama İmajı Doğrulanıyor...'
+                sh 'docker images | grep my-python-app'
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Pipeline tamamlandı.'
+        }
+        success {
+            echo 'Tebrikler! Kod analiz edildi, Docker imajı build edildi ve Nexus deposuna başarıyla yüklendi.'
+        }
+        failure {
+            echo 'Hata! Pipeline bir adımda başarısız oldu.'
+        }
+    }
+}
+```
+
+## ⚙️ Nexus Repository Manager Kurulum ve Yapılandırma Adımları
+1. İlk Şifrenin Alınması:
+
+```bash
+docker exec -it nexus cat /nexus-data/admin.password
+```
+2. EULA (Lisans Sözleşmesi) Onayı: Nexus 3 arayüzünde ilk girişte çıkan End User License Agreement (EULA) onaylanmalıdır. Onaylanmazsa API erişimleri bloke olur.
+
+3. Docker Hosted Repository Oluşturma:
+
+  Recipe: docker (hosted) (Kesinlikle proxy seçilmemelidir)
+  
+  Name: docker-hosted
+  
+  HTTP Port: 8083 (✓ Create an HTTP connector at specified port)
+  
+  Docker Registry API Support: Enable Docker V1 API support (✓ İşaretli)
+  
+  Force basic authentication: ✓ İşaretli (Sürümde varsa işaretlenmeli)
+  
+  Deployment Policy: Allow redeploy
+
+4. Security -> Realms Yapılandırması:
+
+  Sol menüden Security -> Realms alanına gidilmeli ve Docker Bearer Token Realm aktifleştirilip sağdaki Active sütununa taşınmalıdır.
+
+5. Security -> Anonymous Yapılandırması:
+
+  Docker CLI'ın /v2/ API ping isteklerinde 403 Forbidden yerine 401 Unauthorized (Kimlik sor) yanıtı döndürmesi için Enable anonymous access (Anonim erişim) kapatılmalıdır    (Disable).
+
+## 🐞 Kritik Çözüm Rehberi (Troubleshooting Ledger)
+1. tag does not exist: localhost:8083/my-python-app:latest Hatası
+Belirti: Pipeline imajı build etmesine rağmen push adımında imajı bulamadığını söyler.
+
+Kök Neden: Docker CLI, uzak bir registry'e push yaparken imaj adının ön ekinin depoyla eşleşmesini bekler (localhost:8083/<repo-name>:<tag>). Lokalde imaj sadece my-python-app:latest olarak build edildiği için bulunamaz.
+
+Çözüm: Pipeline içerisine docker push öncesine docker tag my-python-app:latest localhost:8083/my-python-app:latest komutu eklendi.
+
+2. docker login Sırasında Sessiz 403 Forbidden Hatası (EULA Tuzağı)
+   
+  Belirti: Şifre, port ve depolama ayarları doğru olduğu halde docker login -u admin ... komutu sürekli 403 Forbidden döner.
+
+  Kök Neden: Docker CLI gerçek hatayı gizleyip sadece status: 403 olarak raporlar. Arka planda ise Nexus 3.94+ sürümleri, EULA (End User License Agreement) sözleşmesi         arayüzden onaylanmadığı için tüm API ve V2 ping isteklerini engellemektedir.
+
+  Çözüm (Hata Tespiti & Çözüm):
+  Gerçek hatayı görmek için Docker CLI aradan çıkarılıp curl komutu kullanıldı:
+
+  ```bash
+  curl -i http://localhost:8083/v2/
+  ```
+
+  Çıktıda You must accept the End User License Agreement (EULA)... uyarısı görüldü.
+
+  Tarayıcıdan http://localhost:8081/#admin/system/license adresine gidilerek sözleşme kabul edildi ve API engeli kaldırıldı.
+
+3. Nexus Web Arayüzü Oturum (CSRF / Cookie) Çakışması
+	
+	Belirti: Kurulum sihirbazında şifre değiştirdikten hemen sonra arayüz sürekli login ekranına atar.
+
+	Kök Neden: Eski oturum çerezleri ile yeni şifre sonrasında üretilen CSRF token'larının çakışması.
+
+	Çözüm: Tarayıcının çerezleri temizlendi veya Gizli Sekme (Incognito) kullanılarak giriş yapıldı.
+
+🏆 Günün Özeti
+Günün sonunda yazdığımız kod Github'dan otomatik olarak alınıyor, SonarQube'de statik kod analizinden geçiyor, Docker tabanlı derleme ortamında konteyner imajı haline getiriliyor ve endüstri standardı Nexus Repository Manager üzerinde versiyonlanarak barındırılıyor!
+
