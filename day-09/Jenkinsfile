@@ -63,6 +63,9 @@ pipeline {
                         sh """
                             echo "Nexus'a login olunuyor..."
                             docker login -u \${NEXUS_USER} -p \${NEXUS_PASS} localhost:8083
+
+							echo "İmaj Nexus formatında etiketleniyor..."
+                            docker tag ${DOCKER_IMAGE} localhost:8083/${DOCKER_IMAGE}
                             
                             echo "İmaj Nexus'a pushlanıyor..."
                             docker push localhost:8083/my-python-app:latest
