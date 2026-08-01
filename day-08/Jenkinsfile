@@ -1,0 +1,100 @@
+pipeline {
+    agent any
+
+    environment {
+        APP_NAME = 'python-flask-app'
+        DOCKER_IMAGE = 'my-python-app:latest'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo 'Kod hazırlanıyor ve uygulama dosyaları yerel workspace içine yazılıyor...'
+                sh '''
+                    # 1. app.py oluşturuluyor
+                    cat << 'EOF' > app.py
+from flask import Flask
+app = Flask(__name__)
+
+@app.route('/')
+def hello():
+    return "DevOps Journey - Day 8: Jenkins & SonarQube Pipeline Dynamic Deployment!"
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
+EOF
+
+                    # 2. requirements.txt oluşturuluyor
+                    cat << 'EOF' > requirements.txt
+flask==3.0.0
+EOF
+
+                    # 3. Dockerfile oluşturuluyor
+                    cat << 'EOF' > Dockerfile
+FROM python:3.9-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+EXPOSE 5000
+CMD ["python", "app.py"]
+EOF
+                '''
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                script {
+                    withCredentials([string(credentialsId: 'sonar-token', variable: 'MY_SONAR_TOKEN')]) {
+                        echo 'SonarQube Statik Kod Analizi Başlatılıyor...'
+
+                        // Workspace izinlerini veriyoruz
+                        sh 'chmod -R 777 .'
+
+                        // NOT: Kodları dinamik ürettiğimiz için -Dsonar.scm.disabled=true ile SCM taramasını kapatıyoruz.
+                        // İleride projeyi Git reposuna bağlayıp oradan checkout ettiğinde bu parametreyi silebilirsin.
+                        sh """
+                            docker run --rm \
+                              --net cicd-net \
+                              -e SONAR_TOKEN="\${MY_SONAR_TOKEN}" \
+                              -v \${WORKSPACE}:/usr/src \
+                              sonarsource/sonar-scanner-cli \
+                              -Dsonar.host.url=http://sonarqube:9000 \
+                              -Dsonar.projectKey=${APP_NAME} \
+			      -Dsonar.projectBaseDir=/usr/src \
+                              -Dsonar.sources=. \
+                              -Dsonar.scm.disabled=true
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                echo 'Docker İmajı Build Ediliyor...'
+                sh 'docker build -t ${DOCKER_IMAGE} .'
+            }
+        }
+
+        stage('Test & Verify') {
+            steps {
+                echo 'Uygulama İmajı Doğrulanıyor...'
+                sh 'docker images | grep my-python-app'
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Pipeline tamamlandı.'
+        }
+        success {
+            echo 'Tebrikler! Kod analizi ve build başarılı.'
+        }
+        failure {
+            echo 'Hata! Pipeline bir adımda başarısız oldu.'
+        }
+    }
+}
