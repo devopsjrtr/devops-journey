@@ -19,14 +19,12 @@ pipeline {
         stage('SonarQube Analysis') {
             steps {
                 script {
-                    // Kodların olduğu alt klasörün içine giriyoruz
                     dir("${WORK_DIR}") {
                         withCredentials([string(credentialsId: 'sonar-token', variable: 'MY_SONAR_TOKEN')]) {
                             echo 'SonarQube Statik Kod Analizi Başlatılıyor...'
                             
                             sh 'chmod -R 777 .'
                             
-                            // Scanner'a WORKSPACE altındaki doğru klasörü bağlıyoruz
                             sh """
                                 docker run --rm \
                                   --net cicd-net \
@@ -35,9 +33,9 @@ pipeline {
                                   sonarsource/sonar-scanner-cli \
                                   -Dsonar.host.url=http://sonarqube:9000 \
                                   -Dsonar.projectKey=${APP_NAME} \
-                                  -Dsonar.sources=. \
-                                  -Dsonar.language=py \
-                                  -Dsonar.inclusions=**/* \
+                                  -Dsonar.sources=/usr/src \
+                                  -Dsonar.inclusions=**/*.py,**/*.txt,**/Dockerfile \
+                                  -Dsonar.sourceEncoding=UTF-8 \
                                   -Dsonar.scm.disabled=true
                             """
                         }
