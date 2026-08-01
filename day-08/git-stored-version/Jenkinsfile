@@ -36,7 +36,8 @@ pipeline {
                                   -Dsonar.host.url=http://sonarqube:9000 \
                                   -Dsonar.projectKey=${APP_NAME} \
                                   -Dsonar.projectBaseDir=/usr/src \
-                                  -Dsonar.sources=.
+                                  -Dsonar.sources=. \
+                                  -Dsonar.inclusions=**/*
                             """
                         }
                     }
