@@ -25,18 +25,18 @@ pipeline {
                             
                             sh 'chmod -R 777 .'
                             
-                            // 1. WORKSPACE'in tamamını bağlıyoruz ki .git klasörü okunsun.
-                            // 2. projectBaseDir ile doğru alt klasörü gösteriyoruz.
-                            // 3. scm.disabled=true parametresini siliyoruz.
+                            // DİKKAT:
+                            // 1. -v yerine "--volumes-from jenkins" kullanıyoruz. Böylece Jenkins'in volume alanı aynen aktarılıyor.
+                            // 2. -w ile Scanner'ın doğrudan doğru workspace alt klasöründe çalışmasını sağlıyoruz.
                             sh """
                                 docker run --rm \
                                   --net cicd-net \
                                   -e SONAR_TOKEN="\${MY_SONAR_TOKEN}" \
-                                  -v \${WORKSPACE}:/usr/src \
+                                  --volumes-from jenkins \
+                                  -w \${WORKSPACE}/${WORK_DIR} \
                                   sonarsource/sonar-scanner-cli \
                                   -Dsonar.host.url=http://sonarqube:9000 \
                                   -Dsonar.projectKey=${APP_NAME} \
-                                  -Dsonar.projectBaseDir=/usr/src/${WORK_DIR} \
                                   -Dsonar.sources=.
                             """
                         }
