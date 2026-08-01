@@ -63,7 +63,7 @@ pipeline {
         }
     }
 
-	stage('Push Docker Image to Nexus') {
+		stage('Push Docker Image to Nexus') {
             steps {
                 echo 'Docker İmajı Nexus Repository Manager adresine yükleniyor...'
                 script {
