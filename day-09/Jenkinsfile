@@ -4,8 +4,10 @@ pipeline {
     environment {
         APP_NAME = 'python-flask-app'
         DOCKER_IMAGE = 'my-python-app:latest'
-        // Dosyalarının bulunduğu alt klasör yolu
-        WORK_DIR = 'day-08/git-stored-version' 
+        // Dosyalarının bulunduğu alt klasör yolu, evdeki WSL Ubuntu makinesi için aşağıdaki şekilde(day-08 ile başlayan)
+		// AWS VPC ortamında kullanım durumuna göre birbiri yerine aktif edilip yorum satırına alınmalı(VPC için day-09)
+        // WORK_DIR = 'day-08/git-stored-version' 
+		WORK_DIR = 'day-09/'
     }
 
     stages {
