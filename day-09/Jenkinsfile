@@ -2,7 +2,8 @@ pipeline {
     agent any
 
     environment {
-        APP_NAME = 'python-flask-app'
+        // VPC'deki sonar'da my-python-app şeklinde proje adı verildiği ve aşağıda direkt adı ile
+		// tanımlandığı için, buradaki definition yorum satırına çekilmiştir. APP_NAME = 'python-flask-app'
         DOCKER_IMAGE = 'my-python-app:latest'
         // Dosyalarının bulunduğu alt klasör yolu, evdeki WSL Ubuntu makinesi için aşağıdaki şekilde(day-08 ile başlayan)
 		// AWS VPC ortamında kullanım durumuna göre birbiri yerine aktif edilip yorum satırına alınmalı(VPC için day-09)
@@ -22,25 +23,15 @@ pipeline {
             steps {
                 script {
                     dir("${WORK_DIR}") {
-                        withCredentials([string(credentialsId: 'sonar-token', variable: 'MY_SONAR_TOKEN')]) { 
-                            echo 'SonarQube Statik Kod Analizi Başlatılıyor...'
-                            
-                            sh 'chmod -R 777 .'
+						withCredentials([string(credentialsId: 'sonar-token', variable: 'MY_SONAR_TOKEN')]) {
+                    		echo 'SonarQube Statik Kod Analizi Başlatılıyor...'
+                    		sh 'chmod -R 777 .'
+                    		sh 'docker run --rm --net cicd-net -e SONAR_TOKEN=' + MY_SONAR_TOKEN + ' --volumes-from jenkins -w "' + WORKSPACE + '/day-09" sonarsource/sonar-scanner-cli -Dsonar.host.url=http://sonarqube:9000 -Dsonar.projectKey=my-python-app -Dsonar.sources=.'
                             
                             // DİKKAT:
                             // 1. -v yerine "--volumes-from jenkins" kullanıyoruz. Böylece Jenkins'in volume alanı aynen aktarılıyor.
                             // 2. -w ile Scanner'ın doğrudan doğru workspace alt klasöründe çalışmasını sağlıyoruz.
-                            sh """
-                                docker run --rm \  
-                                  --net cicd-net \
-                                  -e SONAR_TOKEN="\${MY_SONAR_TOKEN}" \
-                                  --volumes-from jenkins \
-                                  -w "${WORKSPACE}/day-09" \
-                                  sonarsource/sonar-scanner-cli \
-                                  -Dsonar.host.url=http://sonarqube:9000 \
-                                  -Dsonar.projectKey=my-python-app \
-                                  -Dsonar.sources=.
-                            """ 
+
                         }
                     }
                 }
