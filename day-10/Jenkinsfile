@@ -46,7 +46,7 @@ pipeline {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', passwordVariable: 'NEXUS_PASSWORD', usernameVariable: 'NEXUS_USER')]) {
                         echo 'Nexus Docker Registry oturumu açılıyor...'
-                        sh "sudo docker login -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} ${NEXUS_REGISTRY}"
+                        sh "docker login -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} ${NEXUS_REGISTRY}"
                         
                         echo 'İmajlar Nexus deponuza yükleniyor...'
                         sh "docker push ${NEXUS_REGISTRY}/${IMAGE_NAME}:build-${BUILD_NUMBER}"
@@ -61,7 +61,7 @@ pipeline {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', passwordVariable: 'NEXUS_PASSWORD', usernameVariable: 'NEXUS_USER')]) {
                         echo 'Canlı ortam için Nexus login yapılıyor...'
-                        sh "sudo docker login -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} ${NEXUS_REGISTRY}"
+                        sh "docker login -u ${NEXUS_USER} -p ${NEXUS_PASSWORD} ${NEXUS_REGISTRY}"
 
                         echo 'Eski çalışan canlı container varsa durduruluyor ve siliniyor...'
                         sh "docker rm -f ${APP_CONTAINER} || true"
