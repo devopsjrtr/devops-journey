@@ -80,8 +80,9 @@ pipeline {
             steps {
                 script {
                     echo 'Canlıya alınan uygulamanın Sağlık Kontrolü (Health Check) yapılıyor...'
-                    sleep 3
-                    sh "docker exec ${APP_CONTAINER} curl -s -f http://localhost:5000/ || (echo 'Uygulama yanıt vermiyor!' && exit 1)"
+                    sleep 5
+                    // Konteyner içine girmek yerine doğrudan cicd-net ağındaki konteynere istek atıyoruz:
+                    sh "curl -s -f http://production-python-app:5000/ || (echo 'Uygulama yanıt vermiyor!' && exit 1)"
                     echo 'Tebrikler! Uygulama canlı ortamda sorunsuz yanıt veriyor.'
                 }
             }
