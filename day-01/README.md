@@ -635,7 +635,7 @@ Bu günü tamamlarken gerçek dünya CI/CD pipeline süreçlerinde çok sık kar
 - SonarQube CLI konteynerinin geçici olarak tetiklenip kodları analiz ettikten sonra kendini imha etmesi (`--rm`) başarıyla uygulandı.
 - Statik Kod Analizi ve Docker Build adımları hem dinamik hem de GitHub SCM tabanlı senaryolarda uçtan uca otomatikleştirildi.
 
-# 🚀 Gün 09: Jenkins Pipeline ile Nexus Deployment (Artifact Management)
+# 🚀 Day 09: Jenkins Pipeline ile Nexus Deployment (Artifact Management)
 
 Bugün, DevOps mimarimizin en kritik parçalarından biri olan **Artifact Management (Paket Yönetimi)** adımını CI/CD altyapımıza entegre ettik. Endüstri standardı **Sonatype Nexus Repository Manager 3** servisini `docker-compose` altyapımıza dahil ettik, özel bir **Docker Hosted Repository (Özel Docker Deposu)** kurduk ve Jenkins Pipeline'ımızı derlenen Docker imajlarını otomatik olarak etiketleyip (`docker tag`) Nexus depomuza gönderecek (`docker push`) şekilde geliştirdik.
 
@@ -914,3 +914,140 @@ Kök Neden: Docker CLI, uzak bir registry'e push yaparken imaj adının ön ekin
 🏆 Günün Özeti
 Günün sonunda yazdığımız kod Github'dan otomatik olarak alınıyor, SonarQube'de statik kod analizinden geçiyor, Docker tabanlı derleme ortamında konteyner imajı haline getiriliyor ve endüstri standardı Nexus Repository Manager üzerinde versiyonlanarak barındırılıyor!
 
+# 🚀 Day 10: Nexus'tan Canlıya Güncel Sürüm Etiketli Ürünün Yayımlanması (CD Automation)
+
+Bugün, CI/CD boru hattımızın **Continuous Deployment (Sürekli Dağıtım)** halkasını tamamladık. Nexus Repository Manager üzerinde versiyonlanarak barındırılan Docker imajını, dinamik etiketleme (`build-${BUILD_NUMBER}`) ile canlı ortama otomatik olarak dağıtan (deploy eden) süreci inşa ettik.
+
+---
+
+## 🎯 Günün Öğrenim Hedefleri ve Kazanımları
+
+* **Continuous Deployment (CD) Mantığı:** Derlenen ve testten geçen ürünün manuel müdahale olmadan hedef ortama (Production) çekilerek (`docker pull`) yayına alınması.
+* **Dinamik Sürüm Etiketleme (Dynamic Tagging):** Her derlemede `latest` etiketinin yanı sıra `build-${BUILD_NUMBER}` kullanarak imajların versiyon takibini ve geri izlenebilirliğini sağlama.
+* **Zero-Downtime / Container Replacement:** Canlı ortamda çalışan eski sürüm container'ın durdurulup silinmesi (`docker rm -f production-python-app || true`) ve yeni sürüm imaj ile ayağa kaldırılması.
+* **Otomatik Sağlık Kontrolü (Health Check):** Dağıtım sonrası container içi ağ (`cicd-net`) üzerinden `curl` isteği atılarak uygulamanın ayakta olup olmadığının terminalden doğrulanması.
+
+---
+
+## 🔄 Day 10 Pipeline Yapılandırması (Jenkinsfile)
+
+Aşağıdaki `Jenkinsfile`, kodun GitHub'dan çekilmesinden, `day-10` dizininde SonarQube analizinin yapılmasına[cite: 2], Nexus'a imaj yüklenmesinden[cite: 2] canlı ortamda (`production-python-app`) 5000 portunda yayınlanıp test edilmesine kadar olan uçtan uca süreci tanımlar[cite: 2]:
+
+```groovy
+pipeline {
+    agent any
+
+    environment {
+        NEXUS_REGISTRY = 'localhost:8083'
+        IMAGE_NAME     = 'my-python-app'
+        APP_CONTAINER  = 'production-python-app'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                echo 'Kod GitHub deposundan çekildi.'
+                sh 'ls -la'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                script {
+                    dir('day-10') {
+                        withCredentials([string(credentialsId: 'sonar-token', variable: 'MY_SONAR_TOKEN')]) {
+                            echo 'SonarQube Statik Kod Analizi Başlatılıyor...'
+                            sh 'chmod -R 777 .'
+                            sh 'docker run --rm --net cicd-net -e SONAR_TOKEN=' + MY_SONAR_TOKEN + ' --volumes-from jenkins -w "' + WORKSPACE + '/day-10" sonarsource/sonar-scanner-cli -Dsonar.host.url=http://sonarqube:9000 -Dsonar.projectKey=my-python-app -Dsonar.sources=.'
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    dir('day-10') {
+                        echo "Docker imajı derleniyor: ${NEXUS_REGISTRY}/${IMAGE_NAME}:build-${BUILD_NUMBER}"
+                        sh "docker build -t ${NEXUS_REGISTRY}/${IMAGE_NAME}:build-${BUILD_NUMBER} ."
+                        sh "docker tag ${NEXUS_REGISTRY}/${IMAGE_NAME}:build-${BUILD_NUMBER} ${NEXUS_REGISTRY}/${IMAGE_NAME}:latest"
+                    }
+                }
+            }
+        }
+
+        stage('Push Docker Image to Nexus') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', passwordVariable: 'NEXUS_PASSWORD', usernameVariable: 'NEXUS_USER')]) {
+                        echo 'Nexus Docker Registry oturumu açılıyor...'
+                        sh "docker login -u ${NEXUS_USER} -p ${NEXUS_PASSWORD}${NEXUS_REGISTRY}"
+                        
+                        echo 'İmajlar Nexus deponuza yükleniyor...'
+                        sh "docker push ${NEXUS_REGISTRY}/${IMAGE_NAME}:build-${BUILD_NUMBER}"
+                        sh "docker push ${NEXUS_REGISTRY}/${IMAGE_NAME}:latest"
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Production') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', passwordVariable: 'NEXUS_PASSWORD', usernameVariable: 'NEXUS_USER')]) {
+                        echo 'Canlı ortam için Nexus login yapılıyor...'
+                        sh "docker login -u ${NEXUS_USER} -p ${NEXUS_PASSWORD}${NEXUS_REGISTRY}"
+
+                        echo 'Eski çalışan canlı container varsa durduruluyor ve siliniyor...'
+                        sh "docker rm -f ${APP_CONTAINER} || true"
+
+                        echo 'En güncel imaj Nexus depomuzdan çekiliyor...'
+                        sh "docker pull ${NEXUS_REGISTRY}/${IMAGE_NAME}:build-${BUILD_NUMBER}"
+
+                        echo 'Yeni canlı uygulama konteyneri ayağa kaldırılıyor...'
+                        sh "docker run -d --name ${APP_CONTAINER} --net cicd-net -p 5000:5000${NEXUS_REGISTRY}/${IMAGE_NAME}:build-${BUILD_NUMBER}"
+                    }
+                }
+            }
+        }
+
+        stage('Test & Verify Deployment') {
+            steps {
+                script {
+                    echo 'Canlıya alınan uygulamanın Sağlık Kontrolü (Health Check) yapılıyor...'
+                    sleep 5
+                    // Konteyner içine girmek yerine doğrudan cicd-net ağındaki konteynere istek atıyoruz:
+                    sh "curl -s -f http://production-python-app:5000/ || (echo 'Uygulama yanıt vermiyor!' && exit 1)"
+                    echo 'Tebrikler! Uygulama canlı ortamda sorunsuz yanıt veriyor.'
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Pipeline execution completed.'
+        }
+        success {
+            echo 'BAŞARILI: Kod analiz edildi, imaj derlendi, Nexus depoya yüklendi ve canlı ortamda yayına alındı! 🎉'
+        }
+        failure {
+            echo 'HATA: Pipeline süreçlerinden birinde bir aksaklık yaşandı.'
+        }
+    }
+}
+```
+## 🛠️ Karşılaşılan Kritik Hatalar ve Çözüm Rehberi (Troubleshooting)
+
+### 1. `Conflict. The container name "/production-app" is already in use` Hatası
+* **Hatanın Nedeni:** Pipeline tekrar tetiklendiğinde aynı isimdeki container (`production-python-app`) sistemde aktif veya durmuş şekilde bulunduğu için Docker yeni container'ı başlatamaz[cite: 2].
+* **Çözüm:** `Deploy to Production` adımında yeni container çalıştırılmadan hemen önce `docker rm -f ${APP_CONTAINER} || true` komutu eklenerek eski container'ın hata vermeden silinmesi sağlandı[cite: 2].
+
+### 2. Canlı Ortam Sağlık Kontrolü (Health Check) İletişimi
+* **Hatanın Nedeni:** Host portu üzerinden test yaparken ağ izolasyonu veya port yönlendirme gecikmeleri sebebiyle sahte hatalar alınması.
+* **Çözüm:** Konteyner içine girmeden veya Host IP'sine gitmeden doğrudan `cicd-net` ağındaki servis adıyla (`http://production-python-app:5000/`) HTTP kontrolü gerçekleştirilerek pipeline içinde hızlı doğrulama sağlandı.
+
+---
+
+🏆 **Günün Özeti:** Kod değişikliğinin statik analize girdiği, `build-${BUILD_NUMBER}` ve `latest` olarak etiketlenip Nexus depomuzda versiyonlandığı ve `production-python-app` adıyla canlı ortama alınıp, otomatik sağlık kontrolünden geçtiği, uçtan uca bir Sürekli Dağıtım (CD) süreci başarıyla tamamlandı!
