@@ -635,7 +635,7 @@ Bu günü tamamlarken gerçek dünya CI/CD pipeline süreçlerinde çok sık kar
 - SonarQube CLI konteynerinin geçici olarak tetiklenip kodları analiz ettikten sonra kendini imha etmesi (`--rm`) başarıyla uygulandı.
 - Statik Kod Analizi ve Docker Build adımları hem dinamik hem de GitHub SCM tabanlı senaryolarda uçtan uca otomatikleştirildi.
 
-# 🚀 Gün 09: Jenkins Pipeline ile Nexus Repository Manager (Artifact Management)
+# 🚀 Gün 09: Jenkins Pipeline ile Nexus Deployment (Artifact Management)
 
 Bugün, DevOps mimarimizin en kritik parçalarından biri olan **Artifact Management (Paket Yönetimi)** adımını CI/CD altyapımıza entegre ettik. Endüstri standardı **Sonatype Nexus Repository Manager 3** servisini `docker-compose` altyapımıza dahil ettik, özel bir **Docker Hosted Repository (Özel Docker Deposu)** kurduk ve Jenkins Pipeline'ımızı derlenen Docker imajlarını otomatik olarak etiketleyip (`docker tag`) Nexus depomuza gönderecek (`docker push`) şekilde geliştirdik.
 
