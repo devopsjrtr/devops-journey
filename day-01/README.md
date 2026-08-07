@@ -19,6 +19,9 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [x] Day 7: Docker Container'a Jenkins & SonarQube Kurulumu
   - [X] Day 8: Jenkins & SonarQube İletişimini Kurma ve Pipeline Oluşturma
   - [X] Day 8-2: Dosyaların Github'dan alındığı Pipeline Senaryosu
+  - [X] Day-9: Derleme Dosyalarının(Artifact) Nexus'a Deploy Edilmesi
+  - [X] Day-10: Nexus'tan Canlıya Güncel Sürüm Etiketli Ürünün Yayımlanması
+  - [ ] Day-10-2: Github Webhook Eklenmesi, Ayarları ve Otomatik Derleme Tetiklenmesi
 - [ ] **Aşama 3: Infrastructure as Code (Terraform & Ansible)**
 - [ ] **Aşama 4: Orchestration (Kubernetes & Helm)**
 
