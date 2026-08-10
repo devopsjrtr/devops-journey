@@ -22,6 +22,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [X] Day-9: Derleme Dosyalarının(Artifact) Nexus'a Deploy Edilmesi
   - [X] Day-10: Nexus'tan Canlıya Güncel Sürüm Etiketli Ürünün Yayımlanması
   - [X] Day-10-2: Github Webhook Eklenmesi, Ayarları ve Otomatik Derleme Tetiklenmesi
+  - [X] Day 10-3: ChatOps (Slack Entegrasyonu) ve Sunucu Performans İyileştirmeleri
 - [ ] **Aşama 3: Infrastructure as Code (Terraform & Ansible)**
 - [ ] **Aşama 4: Orchestration (Kubernetes & Helm)**
 
@@ -1111,3 +1112,66 @@ Bu entegrasyon ve devamındaki tam otomatik pipeline koşusu sırasında karşı
 ---
 ## 🏆 Günün Özeti
 GitHub, Jenkins, SonarQube, Nexus ve canlı ortam arasındaki tüm teknik engeller, izin sorunları ve kilitlenmeler çözüldü. Artık geliştirici kodunu GitHub'a push ettiği an; analiz, derleme, versiyon etiketleme ve yayına alma işlemleri insan müdahalesi olmadan, tam otomatik ve hatasız olarak gerçekleşiyor!
+
+# 🚀 Gün 10-3: ChatOps (Slack Entegrasyonu) ve Sunucu Performans İyileştirmeleri
+
+Bugün, CI/CD süreçlerimize ChatOps kültürünü entegre ederek, pipeline'ın her adımından anında haberdar olmamızı sağlayan Slack bildirim otomasyonunu kurduk. Ayrıca, ağır Java servislerimizin (Jenkins, SonarQube, Nexus) bulut ortamında (AWS t2.medium) stabil çalışabilmesi için kritik sistem ve bellek (Swap) iyileştirmeleri gerçekleştirdik.
+
+---
+
+## 🎯 Günün Öğrenim Hedefleri ve Kazanımları
+
+1. **ChatOps Kültürü:** Geliştirme ve operasyon süreçlerinin (CI/CD) bir sohbet uygulaması (Slack) üzerinden anlık olarak takip edilmesi.
+2. **Slack API & Jenkins Entegrasyonu:** Slack üzerinde özel bir bot (Custom App) oluşturarak güvenli kimlik doğrulama (Bot Token) ile Jenkins'in dış dünyaya mesaj atmasının sağlanması.
+3. **Sistem Mühendisliği (AWS & Linux):** Fiziksel sınırları zorlayan sunucularda (OOM - Out of Memory riskine karşı) AWS EBS disk genişletme ve Linux sanal bellek (Swap) yönetimi.
+
+---
+
+## ⚙️ Slack ve Jenkins Yapılandırma Adımları
+
+### 1. Slack Tarafı: Bot ve Token Oluşturma
+* **Slack API** üzerinden sıfırdan bir uygulama (Blank App) oluşturuldu.
+* Bota `chat:write` (mesaj gönderme) yetkisi verilerek çalışma alanına (Workspace) kuruldu ve `xoxb-` ile başlayan **Bot User OAuth Token** alındı.
+* Slack kanalına (Örn: `#ci-cd-alerts`) gidilerek `/invite @BotAdi` komutu ile bot kanala davet edildi.
+
+### 2. Jenkins Tarafı: Kimlik Doğrulama ve Sistem Ayarları
+* **Slack Notification Plugin** kuruldu.
+* Alınan bot token, Jenkins Credentials kasasına **"Secret text"** olarak (ID: `slack-token`) güvenli bir şekilde eklendi.
+* **Manage Jenkins -> System** altındaki Slack ayarlarında; "Workspace" alanı boş bırakıldı ve modern bot entegrasyonu için **"Custom slack app bot user"** seçeneği işaretlendi.
+
+### 3. Jenkinsfile Güncellemesi (Bildirim Kodları)
+Pipeline'ın sonuna eklenen `post` bloğu ile süreç sonuçlarının Slack'e otomatik iletilmesi sağlandı:
+
+```groovy
+post {
+    always {
+        echo 'Pipeline execution completed.'
+    }
+    success {
+        slackSend(channel: '#ci-cd-alerts', tokenCredentialId: 'slack-token', color: 'good', message: "✅ *BAŞARILI:* ${env.JOB_NAME} [Build #${env.BUILD_NUMBER}] canlı ortama başarıyla dağıtıldı!\nDetaylar: ${env.BUILD_URL}")
+    }
+    failure {
+        slackSend(channel: '#ci-cd-alerts', tokenCredentialId: 'slack-token', color: 'danger', message: "🚨 *HATA:* ${env.JOB_NAME} [Build #${env.BUILD_NUMBER}] süreçlerinden birinde bir aksaklık yaşandı!\nDetaylar: ${env.BUILD_URL}")
+    }
+}
+```
+## 🐞 Karşılaşılan Kritik Hatalar ve Çözüm Rehberi (Troubleshooting)
+
+### 1. Slack Entegrasyonunda `Illegal character in authority at index 8` Hatası
+* **Belirti:** Jenkins'ten Slack'e test mesajı atarken boşluk karakteri hatası alındı.
+* **Hatanın Nedeni:** Jenkins Slack eklentisinde "Workspace" alanına kısa URL yerine çalışma alanının görünen adının (boşluklu) yazılması.
+* **Çözüm:** Adres çubuğundaki kısa URL (subdomain) kullanıldı (Örn: `devopstrainin-...`). (Daha sonra modern bot yapısına geçildiği için bu alan tamamen boş bırakılarak çözüldü).
+
+### 2. Slack 404 Not Found ve "Failure" Hatası
+* **Belirti:** Jenkins loglarında `Slack post may have failed. Response Code: 404` hatası belirdi ve kanala bildirim düşmedi.
+* **Hatanın Nedeni:** Jenkins'in eski (Legacy) Webhook yöntemini kullanmaya çalışması ve `Jenkinsfile` içerisinde kanal adı / token bilgisinin eksik gönderilmesi.
+* **Çözüm:** Jenkins sistem ayarlarından "Custom slack app bot user" aktifleştirildi. `Jenkinsfile` içerisindeki `slackSend` komutuna `channel` (başında `#` ile) ve `tokenCredentialId` parametreleri manuel olarak tanımlanarak hata giderildi.
+
+### 3. AWS Sunucusunda "Operation not permitted" ve RAM (OOM) Çökmeleri
+* **Belirti:** Nexus ve SonarQube gibi ağır Java servisleri çalışırken sistem kilitleniyor, eski swap alanı silinmek istendiğinde izin hatası veriyordu.
+* **Hatanın Nedeni:** `t2.medium` sunucusunun fiziksel RAM'inin (4 GB) ve eski Swap alanının (2 GB) yetersiz kalması. İşletim sistemi swap dosyasını aktif kullandığı için silinmesine izin vermiyordu.
+* **Çözüm (AWS EBS Resize & Swap Upgrade):**
+  1. AWS konsolundan EC2 disk (EBS) kapasitesi ücretsiz katman sınırları dahilinde 20 GB'tan 30 GB'a yükseltildi.
+  2. Linux tarafında `growpart` ve `resize2fs` komutlarıyla yeni disk alanı işletim sistemine tanıtıldı.
+  3. Ağır Docker servisleri durdurularak (`docker compose stop`) RAM'de yer açıldı, `swapoff` ile eski sanal bellek güvenle kapatılıp silindi.
+  4. `fallocate`, `chmod 600`, `mkswap` ve `swapon` komutları sırasıyla kullanılarak sisteme 4 GB'lık ferah bir Swap alanı tanımlandı.
