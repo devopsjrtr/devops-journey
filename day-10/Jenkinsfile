@@ -96,12 +96,12 @@ post {
         success {
             echo 'BAŞARILI: Kod analiz edildi, imaj derlendi, Nexus depoya yüklendi ve canlı ortamda yayına alındı! 🎉'
             // Slack bildirim komutu:
-            slackSend(color: 'good', message: "✅ *BAŞARILI:* ${env.JOB_NAME} [Build #${env.BUILD_NUMBER}] canlı ortama başarıyla dağıtıldı!\nDetaylar: ${env.BUILD_URL}")
+            slackSend(channel: '#ci-cd-alerts', tokenCredentialId: 'slack-token', color: 'good', message: "✅ *BAŞARILI:* ${env.JOB_NAME} [Build #${env.BUILD_NUMBER}] canlı ortama başarıyla dağıtıldı!\nDetaylar: ${env.BUILD_URL}")
         }
         failure {
             echo 'HATA: Pipeline süreçlerinden birinde bir aksaklık yaşandı.'
             // Slack bildirim komutu:
-            slackSend(color: 'danger', message: "🚨 *HATA:* ${env.JOB_NAME} [Build #${env.BUILD_NUMBER}] süreçlerinden birinde bir aksaklık yaşandı!\nDetaylar: ${env.BUILD_URL}")
+            slackSend(channel: '#ci-cd-alerts', tokenCredentialId: 'slack-token', color: 'danger', message: "🚨 *HATA:* ${env.JOB_NAME} [Build #${env.BUILD_NUMBER}] süreçlerinden birinde bir aksaklık yaşandı!\nDetaylar: ${env.BUILD_URL}")
         }
     }
 }
