@@ -21,7 +21,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [X] Day 8-2: Dosyaların Github'dan alındığı Pipeline Senaryosu
   - [X] Day-9: Derleme Dosyalarının(Artifact) Nexus'a Deploy Edilmesi
   - [X] Day-10: Nexus'tan Canlıya Güncel Sürüm Etiketli Ürünün Yayımlanması
-  - [ ] Day-10-2: Github Webhook Eklenmesi, Ayarları ve Otomatik Derleme Tetiklenmesi
+  - [X] Day-10-2: Github Webhook Eklenmesi, Ayarları ve Otomatik Derleme Tetiklenmesi
 - [ ] **Aşama 3: Infrastructure as Code (Terraform & Ansible)**
 - [ ] **Aşama 4: Orchestration (Kubernetes & Helm)**
 
@@ -454,7 +454,7 @@ chmod +x day-01/sys_check.sh
 
 # 🚀 Day 8: Jenkins & SonarQube Entegrasyonu ve Dinamik Docker Deployment
 
-Bu laboratuvar çalışmasında, **Jenkins Pipeline** üzerinden uygulama dosyalarını dinamik olarak oluşturan, **SonarQube Statik Kod Analizi** gerçekleştiren ve analiz başarıyla tamamlandıktan sonra uygulamanın **Docker İmajını** derleyip doğrulayan tam kapsamlı bir CI/CD boru hattı (pipeline) inşa edilmiştir.
+Bu laboratuvar çalışmasında, **Jenkins Pipeline** üzerinden uygulama dosyalarını dinamik olarak oluşturan, **SonarQube Statik Kod Analizi** gerçekleştiren ve analiz başarıyla tamamlandıktan sonra uygulamanın **Docker İmajını** derleyip doğrulayan tam kapsamlı bir CI/CD Pipeline(Dağıtım/Entegrasyon Hattı) inşa edilmiştir.
 
 ---
 
@@ -916,7 +916,7 @@ Günün sonunda yazdığımız kod Github'dan otomatik olarak alınıyor, SonarQ
 
 # 🚀 Day 10: Nexus'tan Canlıya Güncel Sürüm Etiketli Ürünün Yayımlanması (CD Automation)
 
-Bugün, CI/CD boru hattımızın **Continuous Deployment (Sürekli Dağıtım)** halkasını tamamladık. Nexus Repository Manager üzerinde versiyonlanarak barındırılan Docker imajını, dinamik etiketleme (`build-${BUILD_NUMBER}`) ile canlı ortama otomatik olarak dağıtan (deploy eden) süreci inşa ettik.
+Bugün, CI/CD Pipeline(Dağıtım/Entegrasyon Hattı)'ımızın **Continuous Deployment (Sürekli Dağıtım)** halkasını tamamladık. Nexus Repository Manager üzerinde versiyonlanarak barındırılan Docker imajını, dinamik etiketleme (`build-${BUILD_NUMBER}`) ile canlı ortama otomatik olarak dağıtan (deploy eden) süreci inşa ettik.
 
 ---
 
@@ -1051,3 +1051,63 @@ pipeline {
 ---
 
 🏆 **Günün Özeti:** Kod değişikliğinin statik analize girdiği, `build-${BUILD_NUMBER}` ve `latest` olarak etiketlenip Nexus depomuzda versiyonlandığı ve `production-python-app` adıyla canlı ortama alınıp, otomatik sağlık kontrolünden geçtiği, uçtan uca bir Sürekli Dağıtım (CD) süreci başarıyla tamamlandı!
+
+# 🚀 Gün 10-2: GitHub Webhook Eklenmesi ve Otomatik Tetikleme (CI Trigger)
+
+Bugün, CI/CD Pipeline(Dağıtım/Entegrasyon Hattı)'ımızın otomasyonunu tamamlayarak **Sürekli Entegrasyon (CI)** sürecini gerçek anlamda başlattık. Kod depolarındaki (GitHub) değişiklikleri anlık olarak dinleyen ve Jenkins'teki pipeline'ı otomatik olarak başlatan Webhook entegrasyonunu kurduk.
+
+---
+
+## 🎯 Günün Öğrenim Hedefleri ve Kazanımları
+
+1. **Webhook Mantığı:** Versiyon kontrol sistemlerindeki (GitHub) olayların (push, merge), hedef sistemlere (Jenkins) HTTP istekleriyle anlık olarak bildirilmesi.
+2. **Event-Driven CI/CD:** Manuel tetiklemeler (`Build Now`) yerine, kodun GitHub'a gönderildiği (push) anda pipeline'ın kendi kendini otomatik olarak başlatması.
+3. **Troubleshooting (Hata Giderme):** Jenkins-GitHub iletişimindeki sessiz hataların log analiziyle çözülmesi, SonarQube ve Nexus'taki bellek (OOM) ve yetki kilitlenme (lock) sorunlarının kalıcı olarak giderilmesi.
+
+---
+
+## ⚙️ Webhook Yapılandırma Adımları
+
+### 1. Jenkins Tarafı (Alıcı Ayarları)
+Jenkins'in gelen Webhook isteklerini kabul etmesi ve doğru projeyi tetiklemesi için şu ayarlar yapıldı:
+* İlgili Pipeline projesine (Örn: `cicd-pipeline`) girilip **Configure (Yapılandır)** menüsü açıldı.
+* **Build Triggers (Tetikleyiciler)** sekmesi altında **"GitHub hook trigger for GITScm polling"** seçeneği işaretlendi.
+* ⚠️ **Kritik Kural:** Jenkins'in branch ve repo ayarlarını önbelleğe alabilmesi için, webhook kurulduktan sonra pipeline en az **bir kez manuel olarak (`Build Now`) çalıştırıldı.**
+
+### 2. GitHub Tarafı (Gönderici Ayarları)
+GitHub'daki deponun, değişiklikleri anında Jenkins'e haber vermesi için şu ayarlar yapıldı:
+* GitHub Reposu -> **Settings** -> **Webhooks** -> **Add webhook** yoluna gidildi.
+* **Payload URL:** `http://<JENKINS_SUNUCU_IP>:8080/github-webhook/` *(Sonundaki `/` işareti önemlidir)*
+* **Content type:** `application/json` olarak seçildi.
+* **Which events would you like to trigger this webhook?:** `Just the push event` (Sadece push anında tetikle) seçilerek sınırlandırıldı.
+* **Active** kutucuğu işaretlenip kaydedildi.
+
+---
+
+## 🐞 Karşılaşılan Kritik Hatalar ve Çözüm Rehberi (Troubleshooting)
+
+Bu entegrasyon ve devamındaki tam otomatik pipeline koşusu sırasında karşılaşılan ve başarıyla çözülen kritik sorunlar:
+
+### 1. GitHub Yeşil Tik Veriyor Ama Jenkins Tetiklenmiyor
+* **Belirti:** GitHub'da Webhook teslimatı `HTTP 200 OK` (Poked) dönüyor ancak Jenkins arayüzünde yeni bir build başlamıyor.
+* **Hatanın Nedeni:** Jenkins isteği başarıyla alıyor ancak hiçbir pipeline ile eşleştiremiyor. Bunun temel sebebi; Jenkins job ayarlarında "GitHub hook trigger" seçeneğinin işaretli olmaması, Git branch isminin uyuşmaması veya job'ın daha önce hiç manuel çalıştırılıp SCM bilgilerini indekslememiş olmasıdır.
+* **Çözüm:** Job içindeki "GitHub hook trigger" aktifleştirildi ve pipeline bir kez manuel tetiklenerek webhook'un hedefi tanıması sağlandı.
+
+### 2. SonarQube `Connection refused` ve `vm.max_map_count` Çökmesi
+* **Belirti:** Pipeline'ın statik kod analizi adımında SonarQube aniden `Failed to query ES status` veya `Connection refused` hatası vererek kapanıyor.
+* **Hatanın Nedeni:** SonarQube içindeki Elasticsearch motoru, host sistemin (Linux/WSL2) bellek haritalama limiti (`vm.max_map_count`) varsayılan veya düşük değerde olduğu için bellek hatası verip kendi kendini öldürüyor (`Hard stopping process`). 
+* **Çözüm:** Host makinede `sudo sysctl -w vm.max_map_count=262144` komutu ile limit artırıldı ve SonarQube container'ı yeniden başlatıldı.
+
+### 3. Nexus `Unix error code 2` ve Kilitlenme (Lock) Sorunu
+* **Belirti:** Jenkins, Nexus imaj push adımında `500 Server Error` veya `connection refused` hatası veriyor. Container loglarında ise sürekli `Could not lock User prefs. Unix error code 2` ve `Couldn't get file lock` hataları akıyor.
+* **Hatanın Nedeni:** Java 21 kullanan yeni Nexus sürümlerinin aradığı `.java/.userPrefs` tercih (preferences) dizinleri, volume bağlanırken otomatik oluşturulamadığı için Nexus EULA onayını kontrol edemiyor ve Docker Registry portunu dinlemeye geçemiyor.
+* **Çözüm:** Container içerisine root yetkisiyle girilerek eksik dizinler manuel oluşturuldu ve sahiplik Nexus kullanıcısına (`200:200`) devredildi:
+  ```bash
+  docker exec -it -u 0 nexus mkdir -p /nexus-data/.java/.userPrefs
+  docker exec -it -u 0 nexus chown -R 200:200 /nexus-data/.java
+  docker exec -it -u 0 nexus chmod -R 755 /nexus-data/.java
+  docker compose restart nexus
+  ```
+---
+## 🏆 Günün Özeti
+GitHub, Jenkins, SonarQube, Nexus ve canlı ortam arasındaki tüm teknik engeller, izin sorunları ve kilitlenmeler çözüldü. Artık geliştirici kodunu GitHub'a push ettiği an; analiz, derleme, versiyon etiketleme ve yayına alma işlemleri insan müdahalesi olmadan, tam otomatik ve hatasız olarak gerçekleşiyor!
