@@ -23,7 +23,9 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [X] Day-10: Nexus'tan Canlıya Güncel Sürüm Etiketli Ürünün Yayımlanması
   - [X] Day-10-2: Github Webhook Eklenmesi, Ayarları ve Otomatik Derleme Tetiklenmesi
   - [X] Day 10-3: ChatOps (Slack Entegrasyonu) ve Sunucu Performans İyileştirmeleri
-- [ ] **Aşama 3: Infrastructure as Code (Terraform & Ansible)**
+- [X] **Aşama 3: Infrastructure as Code (Terraform & Ansible)**
+  - [X] Day 11: Infrastructure as Code (IaC) Dünyasına Giriş - Terraform Temelleri
+  - [ ] Day 12: 
 - [ ] **Aşama 4: Orchestration (Kubernetes & Helm)**
 
 ---
@@ -1175,3 +1177,102 @@ post {
   2. Linux tarafında `growpart` ve `resize2fs` komutlarıyla yeni disk alanı işletim sistemine tanıtıldı.
   3. Ağır Docker servisleri durdurularak (`docker compose stop`) RAM'de yer açıldı, `swapoff` ile eski sanal bellek güvenle kapatılıp silindi.
   4. `fallocate`, `chmod 600`, `mkswap` ve `swapon` komutları sırasıyla kullanılarak sisteme 4 GB'lık ferah bir Swap alanı tanımlandı.
+
+# 🚀 Gün 11: Infrastructure as Code (IaC) Dünyasına Giriş - Terraform Temelleri
+
+Bugün, DevOps kültürünün en önemli yapıtaşlarından biri olan "Infrastructure as Code" (Altyapı Kodlama) konseptine giriş yaptık. AWS konsolu üzerinden manuel olarak gerçekleştirdiğimiz sunucu oluşturma ve güvenlik ayarları yapılandırma işlemlerini, HashiCorp Terraform kullanarak tamamen otomatize ettik. 
+
+Kurumsal ağ kısıtlamaları nedeniyle yerel (local) ortam yerine, halihazırda AWS üzerinde koşan mevcut Jenkins (Ubuntu) sunucumuzu bir "Yönetim Sunucusu (Management/Bastion Node)" olarak konumlandırdık.
+
+---
+
+## 🎯 Günün Öğrenim Hedefleri ve Kazanımları
+
+1. **AWS IAM (Identity and Access Management):** Root hesap yerine otomasyon süreçleri için özel, yetkileri sınırlandırılmış (AdministratorAccess) bir IAM kullanıcısı ve Access/Secret Key oluşturulması.
+2. **AWS CLI & Terraform Entegrasyonu:** Yönetim sunucusuna AWS CLI ve Terraform kurularak kimlik doğrulama (`aws configure`) işlemlerinin tamamlanması.
+3. **HCL (HashiCorp Configuration Language) Sözdizimi:** `main.tf` dosyası oluşturularak AWS sağlayıcısı (Provider) ve kaynak (Resource) tanımlamalarının yapılması.
+4. **Terraform Yaşam Döngüsü (Lifecycle):** Altyapının başlatılması (`init`), simüle edilmesi (`plan`), inşa edilmesi (`apply`) ve iş bitiminde temizlenmesi (`destroy`).
+5. **Durum (State) Yönetimi:** Mevcut çalışan bir sunucu silinmeden, üzerine yeni bir Güvenlik Grubu (Security Group) eklenerek altyapının güncellenmesi.
+
+---
+
+## ⚙️ Uygulama Adımları
+
+### 1. Kurulum ve AWS Kimlik Doğrulaması
+Mevcut EC2 sunucusu üzerinde Terraform ve AWS CLI araçları kurularak IAM üzerinden alınan erişim anahtarları sisteme tanımlandı:
+```bash
+# AWS CLI Kurulumu ve Konfigürasyonu
+sudo apt update && sudo apt install awscli -y
+aws configure
+
+# Terraform Kurulumu
+wget -O- [https://apt.releases.hashicorp.com/gpg](https://apt.releases.hashicorp.com/gpg) | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] [https://apt.releases.hashicorp.com](https://apt.releases.hashicorp.com) $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+sudo apt update && sudo apt install terraform -y
+```
+### 🔑 Ek Adım: AWS IAM Kullanıcısı ve Erişim Anahtarlarının (Access/Secret Key) Oluşturulması
+
+Terraform'un (veya herhangi bir otomasyon aracının) AWS üzerinde işlem yapabilmesi için Root (kök) hesap yerine, sınırları belirlenmiş bir IAM kullanıcısına ihtiyacı vardır. Güvenlik en iyi uygulamaları (best practices) gereği bu işlem şu adımlarla gerçekleştirilmiştir:
+
+**1. IAM Kullanıcısının Oluşturulması:**
+* AWS Management Console üzerinden **IAM** modülüne girildi ve sol menüden **Users (Kullanıcılar)** sekmesine geçilerek **Create user** butonuna tıklandı.
+* Kullanıcı adı (Örn: `terraform-admin`) belirlendi. *(Not: Otomasyon aracının AWS web arayüzüne girmesine gerek olmadığı için "Provide user access to the AWS Management Console" seçeneği bilerek boş bırakıldı).*
+* Yetkilendirme adımında **Attach policies directly (İlkeleri doğrudan ekle)** seçeneği işaretlendi. Terraform'un sunucu, ağ ve güvenlik grupları gibi kaynakları özgürce yaratıp silebilmesi için **`AdministratorAccess`** ilkesi (policy) eklendi ve kullanıcı oluşturuldu.
+
+**2. Access Key ve Secret Key Üretilmesi:**
+* Oluşturulan kullanıcının detay sayfasında **Security credentials (Güvenlik kimlik bilgileri)** sekmesine gidildi.
+* Sayfanın alt kısımlarındaki **Access keys** bölümünden **Create access key** butonuna tıklandı.
+* Kullanım senaryosu (Use case) olarak **Command Line Interface (CLI)** seçildi ve onay kutucuğu işaretlenerek ilerlendi.
+* Ekranda güvenlik gereği yalnızca bir kez gösterilen **Access key ID** ve **Secret access key** değerleri kopyalanarak güvenli bir yere not edildi. Bu anahtarlar daha sonra sunucu üzerinde `aws configure` komutu ile sisteme tanıtıldı.
+
+### 2. İlk Terraform Kodunun (main.tf) Yazılması
+Proje dizininde oluşturulan `main.tf` dosyası ile AWS üzerinde `t3.small` tipinde bir Ubuntu sunucusu ve sadece 22. porttan (SSH) erişime izin veren bir Güvenlik Grubu tanımlandı:
+
+```hcl
+provider "aws" {
+  region = "us-east-1" 
+}
+
+# Güvenlik Grubu Tanımlaması
+resource "aws_security_group" "ssh_izni" {
+  name        = "terraform-ssh-sg"
+  description = "SSH baglantisina izin ver"
+
+  ingress {
+    description = "SSH from anywhere"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# EC2 Sunucu Tanımlaması (AWS üzerindeki instance bilgilerimize göre doldurulmuştur)
+resource "aws_instance" "ilk_sunucum" {
+  ami           = "ami-0b6d9d3d33ba97d99" 
+  instance_type = "t3.small"
+  
+  vpc_security_group_ids = [aws_security_group.ssh_izni.id]
+
+  tags = {
+    Name = "Terraform-Ile-Gelen-Sunucu"
+  }
+}
+```
+### 3. Terraform Komutlarının Çalıştırılması
+Yazılan kod, sırasıyla, aşağıdaki temel Terraform komutları kullanılarak AWS üzerinde canlıya alındı ve test edildikten sonra temizlendi:
+
+* `terraform init`: Çalışma dizinini başlattı ve AWS eklentilerini (provider plugins) indirdi.
+
+* `terraform plan`: Yazılan kodun AWS üzerinde yaratacağı değişikliklerin (1 adet EC2, 1 adet SG) simülasyonunu ve özetini sundu.
+
+* `terraform apply`: Planlanan altyapıyı saniyeler içinde hatasız bir şekilde AWS üzerinde inşa etti.
+
+* `terraform destroy`: Eğitim/test amacıyla ayağa kaldırılan tüm kaynakları, bağımlılık sırasına uygun şekilde (önce EC2, sonra Security Group) tamamen silerek gereksiz maliyet oluşmasını engelledi.
