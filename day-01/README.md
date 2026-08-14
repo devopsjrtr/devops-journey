@@ -15,7 +15,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [x] Day 4: Port Mapping & Container Networking
   - [x] Day 5: Docker Volume & Persistence Structure
   - [x] Day 6: Docker Compose & Compose Yaml Oluşturma
-- [x] **Aşama 2: CI/CD Pipeline Otomasyonu (Jenkins & SonarQube)**
+- [x] **Aşama 2: CI/CD Pipeline Otomasyonu (Jenkins & SonarQube & Nexus)**
   - [x] Day 7: Docker Container'a Jenkins & SonarQube Kurulumu
   - [X] Day 8: Jenkins & SonarQube İletişimini Kurma ve Pipeline Oluşturma
   - [X] Day 8-2: Dosyaların Github'dan alındığı Pipeline Senaryosu
@@ -25,7 +25,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [X] Day 10-3: ChatOps (Slack Entegrasyonu) ve Sunucu Performans İyileştirmeleri
 - [X] **Aşama 3: Infrastructure as Code (Terraform & Ansible)**
   - [X] Day 11: Infrastructure as Code (IaC) Dünyasına Giriş - Terraform Temelleri
-  - [ ] Day 12: 
+  - [X] Day 12: Terraform'da Değişkenler, Çıktılar ve Otomatik Kurulum (User Data)
 - [ ] **Aşama 4: Orchestration (Kubernetes & Helm)**
 
 ---
@@ -1276,3 +1276,110 @@ Yazılan kod, sırasıyla, aşağıdaki temel Terraform komutları kullanılarak
 * `terraform apply`: Planlanan altyapıyı saniyeler içinde hatasız bir şekilde AWS üzerinde inşa etti.
 
 * `terraform destroy`: Eğitim/test amacıyla ayağa kaldırılan tüm kaynakları, bağımlılık sırasına uygun şekilde (önce EC2, sonra Security Group) tamamen silerek gereksiz maliyet oluşmasını engelledi.
+
+# 🚀 Gün 12: Terraform'da Değişkenler, Çıktılar ve Otomatik Kurulum (User Data)
+
+Bugün, Terraform becerilerimizi bir üst seviyeye taşıyarak statik ve manuel (hardcoded) altyapı kodlamasından dinamik, modüler ve kendi kendini yapılandıran (bootstrapping) sistem mimarisine geçiş yaptık. Boş bir sunucu ayağa kaldırmak yerine, açılış sırasında içerisine otomatik olarak Nginx Web Sunucusu kuran bir yapı inşa ettik.
+
+---
+
+## 🎯 Günün Öğrenim Hedefleri ve Kazanımları
+
+1. **Modüler Dosya Yapısı:** Tüm kodları `main.tf` içine yazmak yerine, endüstri standartlarına uygun olarak `variables.tf` (değişkenler) ve `outputs.tf` (çıktılar) dosyalarıyla projeyi parçalara ayırma.
+2. **Değişken Yönetimi (Variables):** Sunucu tipi, AWS bölgesi gibi değerleri parametrik hale getirerek kodun tekrar kullanılabilirliğini artırma.
+3. **Çıktı Yönetimi (Outputs):** Oluşturulan sunucunun Public IP adresini, AWS konsoluna girmeye gerek kalmadan terminal üzerinden otomatik olarak öğrenme.
+4. **Bootstrapping (User Data):** Sunucu ilk defa başlatılırken çalıştırılacak shell komutlarını (`user_data`) Terraform koduna gömerek Nginx web sunucusunun otomatik kurulumunu sağlama.
+5. **State (Durum) Mimarisi:** Terraform'un AWS üzerindeki kaynakları nasıl takip ettiğini sağlayan `terraform.tfstate` dosyasının önemini kavrama.
+
+---
+
+## ⚙️ Uygulama Adımları
+
+### 1. Parametrik Yapının Kurulması (variables.tf)
+Proje dizininde oluşturulan `variables.tf` dosyası ile AWS bölgesi ve sunucu tipi dinamik hale getirildi:
+
+```hcl
+variable "aws_region" {
+  description = "AWS'de calisacagimiz bolge"
+  default     = "us-east-1"
+}
+
+variable "sunucu_tipi" {
+  description = "EC2 instance tipi"
+  default     = "t3.small"
+}
+
+variable "ami_id" {
+  description = "EC2 AMI id'si"
+  default     = "ami-0b6d9d3d33ba97d99"
+}
+```
+### 2. Çıktıların Tanımlanması (outputs.tf)
+Altyapı ayağa kalktıktan sonra atanan dinamik IP adresini terminalde görebilmek için `outputs.tf` oluşturuldu:
+
+```hcl
+output "web_sunucu_ip" {
+  description = "Nginx sunucusunun public IP adresi"
+  value       = aws_instance.web_sunucum.public_ip
+}
+```
+
+### 3. Ana Altyapı ve User Data (main.tf)
+Web trafiğine (Port 80) izin veren güvenlik grubu ve açılış sırasında Nginx kurulumu yapan `user_data` bloğu eklendi:
+
+```hcl
+provider "aws" {
+  region = var.aws_region
+}
+
+resource "aws_security_group" "web_sg" {
+  name        = "terraform-web-sg"
+  description = "SSH ve HTTP erisimine izin ver"
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_instance" "web_sunucum" {
+  ami           = var.ami_id # us-east-1 için Ubuntu 22.04 
+  instance_type = var.sunucu_tipi
+  vpc_security_group_ids = [aws_security_group.web_sg.id]
+
+  # Sunucu ilk açıldığında otomatik Nginx kuran script
+  user_data = <<-EOF
+              #!/bin/bash
+              apt-get update -y
+              apt-get install nginx -y
+              systemctl start nginx
+              systemctl enable nginx
+              echo "<h1>Terraform ile Otomatik Kurulan Web Sunucusuna Hos Geldiniz!</h1>" > /var/www/html/index.html
+              EOF
+
+  tags = {
+    Name = "Terraform-Nginx-Sunucu"
+  }
+}
+```
+
+### 4. Çalıştırma, Test ve Temizlik
+* **`terraform apply`** ile altyapı ayağa kaldırıldı ve terminal çıktısı olarak gelen IP adresi (örn: `Outputs: web_sunucu_ip = "3.23.xx.xx"`) tarayıcıda açılarak Nginx karşılama sayfası doğrulandı.
+* Sistemin arka planda güncellediği `terraform.tfstate` dosyasının JSON yapısı incelenerek durum yönetimi (state management) anlaşıldı.
+* İşlem sonunda **`terraform destroy`** komutu çalıştırılarak tüm test altyapısı güvenli ve otomatik bir şekilde temizlendi.
