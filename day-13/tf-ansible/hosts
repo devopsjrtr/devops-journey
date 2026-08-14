@@ -1,0 +1,6 @@
+[webservers]
+34.231.225.14
+
+[webservers:vars]
+ansible_user=ubuntu
+ansible_ssh_private_key_file=~/.ssh/ansible_rsa

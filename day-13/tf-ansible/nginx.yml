@@ -1,0 +1,19 @@
+---
+- name: Uzak Sunucuya Nginx Kurulumu
+  hosts: webservers
+  become: yes  # Root (sudo) yetkisiyle çalışması için gerekli
+  tasks:
+    - name: Apt onbellegini guncelle
+      apt:
+        update_cache: yes
+
+    - name: Nginx paketini kur
+      apt:
+        name: nginx
+        state: present
+
+    - name: Nginx servisini baslat ve aktif et
+      service:
+        name: nginx
+        state: started
+        enabled: yes

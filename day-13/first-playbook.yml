@@ -1,0 +1,14 @@
+---
+- name: Ilk Ansible Deneyimimiz
+  hosts: local
+  tasks:
+    - name: Gecici dizinde yeni bir klasor olustur
+      file:
+        path: /tmp/ansible_demo
+        state: directory
+        mode: '0755'
+
+    - name: Icine sihirli bir metin dosyasi yaz
+      copy:
+        content: "Merhaba DevOps Dunyasi! Ben Ansible, bu dosyayi tamamen otomatik olusturdum.\n"
+        dest: /tmp/ansible_demo/merhaba.txt
