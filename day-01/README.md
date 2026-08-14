@@ -26,6 +26,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
 - [X] **Aşama 3: Infrastructure as Code (Terraform & Ansible)**
   - [X] Day 11: Infrastructure as Code (IaC) Dünyasına Giriş - Terraform Temelleri
   - [X] Day 12: Terraform'da Değişkenler, Çıktılar ve Otomatik Kurulum (User Data)
+  - [X] Day 13: Configuration Management - Ansible ve Terraform Entegrasyonu
 - [ ] **Aşama 4: Orchestration (Kubernetes & Helm)**
 
 ---
@@ -1383,3 +1384,128 @@ resource "aws_instance" "web_sunucum" {
 * **`terraform apply`** ile altyapı ayağa kaldırıldı ve terminal çıktısı olarak gelen IP adresi (örn: `Outputs: web_sunucu_ip = "3.23.xx.xx"`) tarayıcıda açılarak Nginx karşılama sayfası doğrulandı.
 * Sistemin arka planda güncellediği `terraform.tfstate` dosyasının JSON yapısı incelenerek durum yönetimi (state management) anlaşıldı.
 * İşlem sonunda **`terraform destroy`** komutu çalıştırılarak tüm test altyapısı güvenli ve otomatik bir şekilde temizlendi.
+
+# 🚀 Gün 13: Configuration Management - Ansible ve Terraform Entegrasyonu
+
+Bugün, sadece altyapı (donanım/ağ) kurmayı değil, kurulan bu altyapının içini otomatize etmeyi öğrendik. "Agentless (Ajansız)" yapısıyla öne çıkan Ansible'ı kullanarak, Terraform ile ayağa kaldırdığımız yepyeni bir sunucuya uzaktan bağlanıp Nginx web sunucusu kurulumunu gerçekleştirdik.
+
+---
+
+## 🎯 Günün Öğrenim Hedefleri ve Kazanımları
+
+1. **Ansible Temelleri:** Yönetim sunucusuna (Control Node) Ansible kurularak ajan gerektirmeyen (Agentless) SSH tabanlı mimarinin kavranması.
+2. **Kimlik Doğrulama (SSH Keys):** Otomasyon araçlarının birbiriyle şifresiz konuşabilmesi için RSA tabanlı SSH anahtarlarının (`ssh-keygen`) üretilmesi.
+3. **Terraform ile Anahtar Yönetimi:** Üretilen Public Key'in `aws_key_pair` modülü ile AWS'ye yüklenerek yeni açılan sunuculara otomatik tanımlanması.
+4. **Envanter (Inventory) Yönetimi:** Ansible'ın hangi sunuculara bağlanacağını ve hangi ayarları kullanacağını belirten `hosts` dosyasının (INI formatında) yapılandırılması.
+5. **Playbook Yazımı (YAML):** Sistem yapılandırma adımlarının (paket güncelleme, kurulum, servis başlatma) `nginx.yml` playbook'u ile kodlanması.
+6. **Sorun Giderme:** `terraform output` ile kaybolan çıktıların geri getirilmesi ve HCL (Terraform) sözdizimi ile YAML/INI dosya formatlarındaki boşluk/satır kurallarının öğrenilmesi.
+
+---
+
+## ⚙️ Uygulama Adımları
+
+### 1. SSH Anahtarı Üretimi
+Ansible'ın AWS'deki yeni sunucuya şifresiz girebilmesi için Yönetim Sunucusunda özel bir anahtar üretildi:
+```bash
+ssh-keygen -t rsa -b 2048 -f ~/.ssh/ansible_rsa -N ""
+```
+
+### 2. Terraform ile Altyapının İnşası (`main.tf`)
+Önceki günlerden farklı olarak, üretilen SSH anahtarını AWS'ye tanıtan ve sunucuya bağlayan altyapı kodu yazıldı:
+
+```hcl
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_key_pair" "ansible_key" {
+  key_name   = "ansible-ssh-key"
+  public_key = file("~/.ssh/ansible_rsa.pub")
+}
+
+resource "aws_security_group" "web_sg" {
+  name = "tf-ansible-sg"
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_instance" "hedef_sunucu" {
+  ami                    = "ami-0b6d9d3d33ba97d99"
+  instance_type          = "t3.small"
+  key_name               = aws_key_pair.ansible_key.key_name
+  vpc_security_group_ids = [aws_security_group.web_sg.id]
+  
+  tags = { 
+    Name = "Ansible-Hedef-Sunucu" 
+  }
+}
+
+output "hedef_ip" {
+  value = aws_instance.hedef_sunucu.public_ip
+}
+```
+*Kod `terraform init` ve `terraform apply` ile çalıştırılarak hedef IP adresi alındı.*
+
+### 3. Ansible Envanterinin Hazırlanması (`hosts`)
+Ansible'ın hedef sunucuyu ve bağlantı ayarlarını tanıması için profesyonel blok yapısıyla `hosts` dosyası oluşturuldu:
+
+```ini
+[webservers]
+<TERRAFORM_CIKTISI_IP_ADRESI>
+
+[webservers:vars]
+ansible_user=ubuntu
+ansible_ssh_private_key_file=~/.ssh/ansible_rsa
+```
+
+### 4. Kurulum Tarifinin Yazılması (`nginx.yml`)
+Uzak sunucuya Nginx kurup başlatacak Ansible Playbook dosyası YAML formatında hazırlandı:
+
+```yaml
+---
+- name: Uzak Sunucuya Nginx Kurulumu
+  hosts: webservers
+  become: yes
+  tasks:
+    - name: Apt onbellegini guncelle
+      apt:
+        update_cache: yes
+
+    - name: Nginx paketini kur
+      apt:
+        name: nginx
+        state: present
+
+    - name: Nginx servisini baslat ve aktif et
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+```
+
+### 5. Playbook'un Çalıştırılması ve Test
+SSH parmak izi (fingerprint) doğrulaması geçici olarak atlanarak Playbook hedef sunucuya uygulandı:
+```bash
+export ANSIBLE_HOST_KEY_CHECKING=False
+ansible-playbook -i hosts nginx.yml
+```
+*İşlem sonucunda Terraform'un verdiği IP adresine tarayıcıdan gidilerek Nginx sayfasının başarıyla yayınlandığı doğrulandı.*
