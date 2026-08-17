@@ -1583,3 +1583,60 @@ Minikube'un Docker içindeki izole yapısını aşmak için EC2 ana makinesi ile
 kubectl port-forward --address 0.0.0.0 svc/nginx-service 30080:80
 ```
 *İşlem sonucunda dış bilgisayardaki tarayıcıdan EC2'nin public IP adresi ve 30080 portu kullanılarak Nginx karşılama sayfasına başarıyla ulaşıldı.*
+
+
+# 🚀 Gün 15: Orchestration - Kubernetes Deployment ve ReplicaSet Mimarisi
+
+Bugün, Kubernetes üzerinde uygulamaların nasıl kesintisiz, ölçeklenebilir ve hatalara karşı dirençli hale getirildiğini öğrendik. Tekil ve "ölümlü" Pod'ları manuel yönetmek yerine, bu işi otomatize eden **Deployment** ve **ReplicaSet** objelerinin gücünü kullanarak "Sıfır Kesinti" (Zero-Downtime) prensibini uygulamalı olarak test ettik.
+
+---
+
+## 🎯 Günün Öğrenim Hedefleri ve Kazanımları
+
+1. **Hiyerarşik K8s Mimarisi:** `Deployment -> ReplicaSet -> Pod` ilişkisinin kavranması ve uygulamaların doğrudan Pod yerine Deployment manifestoları ile yönetilmesinin önemi.
+2. **Self-Healing (Oto-İyileştirme):** ReplicaSet'in, belirlenen sayıdaki Pod'un (örneğin 3 adet) her zaman ayakta kalmasını sağlama garantisi ve çöken/silinen Pod'ların saniyeler içinde otomatik olarak yeniden oluşturulması.
+3. **Rolling Update (Sıfır Kesinti ile Güncelleme):** Uygulamanın yeni bir versiyonuna geçiş yaparken, eski Pod'ların tümünün aynı anda kapatılmayıp; yenileri ayağa kalktıkça eskilerinin kademeli olarak silinmesi mantığı.
+4. **Rollback (Geri Alma) ve Hata Yönetimi:** Hatalı veya var olmayan bir imajın (`ImagePullBackOff`) canlıya alınmaya çalışıldığında Kubernetes'in süreci nasıl durdurduğu ve `rollout undo` komutu ile sistemin anında stabil eski sürüme nasıl döndürüldüğü.
+
+---
+
+## ⚙️ Uygulama Adımları
+
+### 1. Deployment Objesinin Oluşturulması
+Mevcut Terraform + Minikube altyapısı üzerinde `day-15` klasörü oluşturularak, 3 replikalı (kopya) bir Nginx Deployment'ı yazıldı:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+      - name: nginx-container
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+```
+*Manifest `kubectl apply -f nginx-deployment.yaml` komutu ile uygulandı ve `kubectl get deploy,rs,pods` ile hiyerarşi gözlemlendi.*
+
+### 2. Kaos Mühendisliği (Self-Healing Testi)
+Sistemin tepkisini ölçmek için çalışan Pod'lardan biri bilinçli olarak silindi (`kubectl delete pod <POD_ISMI>`). ReplicaSet'in durumu anında fark edip saniyeler içinde eksilen Pod'un yerine yenisini ayağa kaldırdığı doğrulandı.
+
+### 3. Sürüm Güncelleme (Rolling Update) Testi
+Deployment dosyasındaki imaj etiketi `nginx:1.25.0` olarak değiştirilip K8s'e iletildi. `kubectl rollout status deployment/nginx-deployment` komutu ile kesintisiz geçiş süreci canlı olarak izlendi.
+
+### 4. Hata Simülasyonu ve Rollback (Geri Alma)
+Dosyaya kasıtlı olarak `nginx:olmayan-bozuk-surum` yazılarak hatalı bir sürüm çıkışı simüle edildi. K8s'in bozuk Pod'ları başlatamadığı için eski Pod'ları silmeyi durdurduğu gözlemlendi. Ardından hayat kurtaran şu komut ile sistem güvenli versiyona geri döndürüldü:
+```bash
+kubectl rollout undo deployment/nginx-deployment
+```
+*Geri dönüş sonrasında sistemin 3 stabil Pod ile hizmet vermeye devam ettiği `kubectl get pods` komutu ile doğrulandı.*
