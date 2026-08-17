@@ -27,6 +27,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [X] Day 11: Infrastructure as Code (IaC) Dünyasına Giriş - Terraform Temelleri
   - [X] Day 12: Terraform'da Değişkenler, Çıktılar ve Otomatik Kurulum (User Data)
   - [X] Day 13: Configuration Management - Ansible ve Terraform Entegrasyonu
+  - [X] Day 14: Orchestration - Kubernetes Temelleri ve Cluster Kurulumu
 - [ ] **Aşama 4: Orchestration (Kubernetes & Helm)**
 
 ---
@@ -1509,3 +1510,76 @@ export ANSIBLE_HOST_KEY_CHECKING=False
 ansible-playbook -i hosts nginx.yml
 ```
 *İşlem sonucunda Terraform'un verdiği IP adresine tarayıcıdan gidilerek Nginx sayfasının başarıyla yayınlandığı doğrulandı.*
+
+# 🚀 Gün 14: Orchestration - Kubernetes Temelleri ve Cluster Kurulumu
+
+Bugün, DevOps piramidinin en önemli aşamalarından biri olan **Aşama 4: Orchestration (Kubernetes)** dünyasına giriş yaptık. Donanım kaynaklarını optimize etmek adına Terraform ile Kubernetes'e özel (t3.medium) yeni bir sunucu inşa ettik ve içerisine tek düğümlü bir cluster olan Minikube'u kurarak ilk Pod'umuzu dış dünyaya açtık.
+
+---
+
+## 🎯 Günün Öğrenim Hedefleri ve Kazanımları
+
+1. **Altyapı Gereksinimleri:** Kubernetes'in çalışabilmesi için gereken minimum donanım kaynaklarının (2 vCPU, 2+ GB RAM) analizi ve Terraform ile uygun sunucunun (t3.medium) otomatik inşası.
+2. **K8s Bileşenleri:** Kubernetes mimarisindeki ana araçların görevleri:
+    * **Docker:** Konteyner motoru (Driver).
+    * **Kubectl:** Cluster ile iletişim kurmamızı sağlayan komut satırı aracı (Uzaktan kumanda).
+    * **Minikube:** Geliştirme/öğrenme amaçlı tek düğümlü (Single-Node) yerel Kubernetes ortamı.
+3. **Pod Kavramı ve Yönetimi:** Kubernetes'in en küçük yapı taşı olan Pod mimarisinin anlaşılması ve hem **Imperative** (komut satırından `kubectl run`) hem de **Declarative** (YAML/Manifest dosyası ile) olarak yönetilmesi.
+4. **Networking (Service):** İzole ağda çalışan Pod'lara dış dünyadan (internet üzerinden) erişim sağlayabilmek için **NodePort** tipinde bir Service (Servis) objesi oluşturulması ve port yönlendirmesi (`port-forward`).
+
+---
+
+## ⚙️ Uygulama Adımları
+
+### 1. K8s İçin Terraform Altyapısının Kurulması
+Kubernetes'i rahat çalıştırabilmesi için `t3.medium` tipinde ve 20GB diskli bir sunucu Terraform ile inşa edildi. İlgili güvenlik grubunda SSH (22) ve NodePort uygulamaları için (30000-32767) port aralığı açıldı. Dün oluşturulan `ansible-ssh-key` sunucuya bağlandı.
+
+### 2. K8s Sunucusuna Bağlantı ve Araç Kurulumları
+Oluşturulan yeni sunucuya SSH ile bağlanılarak sırasıyla şu araçlar kuruldu:
+* **Docker Motoru:** `sudo apt install docker.io` ile kurulup yetkilendirildi.
+* **Kubectl:** İndirilip çalıştırılabilir yetkisi verilerek `/usr/local/bin` dizinine taşındı.
+* **Minikube:** İndirilip sistem yoluna eklendi ve `minikube start --driver=docker` komutuyla Kubernetes cluster'ı ayağa kaldırıldı.
+* *Kurulum `kubectl get nodes` komutu ile (Ready durumu) doğrulandı.*
+
+### 3. Declarative Pod Oluşturulması (nginx-pod.yaml)
+Kubernetes'e Nginx imajını kullanarak bir Pod oluşturmasını söyleyen Manifest dosyası yazıldı ve `kubectl apply -f` komutu ile uygulandı.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: yaml-nginx-pod
+  labels:
+    app: web
+spec:
+  containers:
+  - name: nginx-container
+    image: nginx:latest
+    ports:
+    - containerPort: 80
+```
+
+### 4. Dışarıya Açılma - Service Oluşturulması (nginx-service.yaml)
+Pod'a dışarıdan (EC2 üzerinden) erişebilmek için 30080 portunu açan bir Service objesi yaratıldı:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  type: NodePort
+  selector:
+    app: web
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30080
+```
+
+### 5. Port Yönlendirme ve Test
+Minikube'un Docker içindeki izole yapısını aşmak için EC2 ana makinesi ile Minikube servisi arasında köprü kuruldu:
+```bash
+kubectl port-forward --address 0.0.0.0 svc/nginx-service 30080:80
+```
+*İşlem sonucunda dış bilgisayardaki tarayıcıdan EC2'nin public IP adresi ve 30080 portu kullanılarak Nginx karşılama sayfasına başarıyla ulaşıldı.*
