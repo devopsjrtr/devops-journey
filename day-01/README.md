@@ -28,8 +28,9 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [X] Day 12: Terraform'da Değişkenler, Çıktılar ve Otomatik Kurulum (User Data)
   - [X] Day 13: Configuration Management - Ansible ve Terraform Entegrasyonu
   - [X] Day 14: Orchestration - Kubernetes Temelleri ve Cluster Kurulumu
+  - [X] Day 15: Orchestration - Kubernetes Deployment ve ReplicaSet Mimarisi
 - [ ] **Aşama 4: Orchestration (Kubernetes & Helm)**
-
+  - [X] Day 16: Orchestration - Helm (Kubernetes Paket Yöneticisi)
 ---
 
 ## 📅 Day 1: Linux Temelleri & Sistem Yönetimi
@@ -1640,3 +1641,59 @@ Dosyaya kasıtlı olarak `nginx:olmayan-bozuk-surum` yazılarak hatalı bir sür
 kubectl rollout undo deployment/nginx-deployment
 ```
 *Geri dönüş sonrasında sistemin 3 stabil Pod ile hizmet vermeye devam ettiği `kubectl get pods` komutu ile doğrulandı.*
+
+# 🚀 Gün 16: Orchestration - Helm (Kubernetes Paket Yöneticisi)
+
+Bugün, Kubernetes üzerinde uygulamaları kurmanın, güncellemenin ve yönetmenin en modern ve standart yolu olan **Helm**'i öğrendik. Onlarca satırlık karmaşık YAML dosyalarını elle yazmak yerine, "Chart" adı verilen hazır paketleri kullanarak devasa sistemleri (Redis, Nginx vb.) tek komutla K8s ortamımıza nasıl entegre edeceğimizi ve kendi ihtiyaçlarımıza göre nasıl özelleştireceğimizi pratik ettik.
+
+---
+
+## 🎯 Günün Öğrenim Hedefleri ve Kazanımları
+
+1. **Helm Mimarisini Anlama:** Linux'taki `apt` veya Node.js'teki `npm` gibi, Kubernetes ekosisteminin paket yöneticisi olan Helm'in temel çalışma mantığının kavranması.
+2. **Repo (Depo) Yönetimi:** Endüstri standardı olan güvenilir Chart depolarının (Bitnami) K8s ortamına eklenmesi ve güncellenmesi.
+3. **Hızlı Kurulum ve Temizlik:** Karmaşık yapıların (Örn: Redis) `helm install` ile tek komutla ayağa kaldırılması ve `helm uninstall` ile arkasında hiçbir kalıntı bırakmadan saniyeler içinde temizlenmesi.
+4. **Özelleştirme (values.yaml):** Hazır şablonların, `values.yaml` dosyası kullanılarak kendi altyapı ihtiyaçlarımıza göre (Replika sayısı, NodePort ağ yapılandırması vb.) manipüle edilmesi.
+
+---
+
+## ⚙️ Uygulama Adımları
+
+### 1. Helm Kurulumu ve Repo Yapılandırması
+K8s (Minikube) sunucusuna Helm'in resmi kurulum scripti kullanılarak kurulum yapıldı ve sektör standartı olan Bitnami deposu eklendi:
+```bash
+curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+chmod 700 get_helm.sh
+./get_helm.sh
+
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+```
+
+### 2. Standart Kurulum ve Kaldırma Testi (Redis)
+Helm'in gücünü görmek için Redis veritabanı tek komutla K8s cluster'ına kuruldu ve ardından sistemden temizlendi:
+```bash
+helm install benim-redisim bitnami/redis
+# Kurulan tüm objeler incelendikten sonra temizlendi:
+helm uninstall benim-redisim
+```
+
+### 3. Özelleştirilmiş Nginx Kurulumu (values.yaml)
+Nginx web sunucusunun varsayılan ayarlarını ezmek için `day-16` klasörü altında `my-nginx-values.yaml` adlı bir konfigürasyon dosyası oluşturuldu:
+```yaml
+replicaCount: 2
+service:
+  type: NodePort
+```
+Bu ayar dosyası `-f` parametresiyle Helm'e verilerek özelleştirilmiş kurulum gerçekleştirildi:
+```bash
+helm install ozel-sunucum bitnami/nginx -f my-nginx-values.yaml
+```
+
+### 4. Doğrulama ve Ağ Erişimi (Port-Forwarding)
+Kurulumun ardından `kubectl get pods` ile 2 adet replikanın çalıştığı ve `kubectl get svc` ile servise rastgele bir NodePort atandığı doğrulandı. 
+Son olarak dışarıdan erişim için EC2 ile Minikube arasına port köprüsü kurularak test edildi:
+```bash
+kubectl port-forward --address 0.0.0.0 svc/ozel-sunucum-nginx <ATANAN_RASTGELE_PORT>:80
+```
+*Test sonucunda tarayıcıdan EC2 Public IP adresi kullanılarak özelleştirilmiş Nginx sunucusuna başarıyla ulaşıldı.*
