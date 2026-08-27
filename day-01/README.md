@@ -31,6 +31,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [X] Day 15: Orchestration - Kubernetes Deployment ve ReplicaSet Mimarisi
 - [ ] **Aşama 4: Orchestration (Kubernetes & Helm)**
   - [X] Day 16: Orchestration - Helm (Kubernetes Paket Yöneticisi)
+  - [X] Day 17: Orchestration - Kubernetes Ingress ve Ağ Yönetimi (Path-Based Routing)
 ---
 
 ## 📅 Day 1: Linux Temelleri & Sistem Yönetimi
@@ -1697,3 +1698,141 @@ Son olarak dışarıdan erişim için EC2 ile Minikube arasına port köprüsü 
 kubectl port-forward --address 0.0.0.0 svc/ozel-sunucum-nginx <ATANAN_RASTGELE_PORT>:80
 ```
 *Test sonucunda tarayıcıdan EC2 Public IP adresi kullanılarak özelleştirilmiş Nginx sunucusuna başarıyla ulaşıldı.*
+
+# 🚀 Gün 17: Orchestration - Kubernetes Ingress ve Ağ Yönetimi (Path-Based Routing)
+
+Bugün, Kubernetes kümelerindeki uygulamaları dış dünyaya açmanın en profesyonel yolu olan **Ingress Controller** mimarisini öğrendik. Her uygulama için güvenlik duvarında ayrı bir port (`NodePort`) açmanın getirdiği karmaşa ve güvenlik risklerinden kurtularak; tüm trafiği tek bir noktadan alıp URL yollarına (Path) göre içerideki kapalı (`ClusterIP`) servislere yönlendiren "Trafik Polisi" yapısını inşa ettik.
+
+---
+
+## 🎯 Günün Öğrenim Hedefleri ve Kazanımları
+
+1. **Ingress Mimarisi (L7 Yönlendirme):** Dışarıdan gelen HTTP/HTTPS isteklerinin, alan adına (Host) veya URL yoluna (Path) göre K8s içindeki doğru servislere nasıl yönlendirildiğinin kavranması.
+2. **Minikube Addons (Eklentiler):** Minikube'un sunduğu yerleşik eklentiler sayesinde karmaşık Ingress Controller kurulumunun (Nginx Ingress) tek komutla aktifleştirilmesi.
+3. **ClusterIP ile İç Güvenlik:** Uygulamaların dışarıdan doğrudan erişime kapatılarak sadece K8s iç ağında (ClusterIP) çalıştırılması ve dış dünyanın sadece Ingress ile muhatap edilmesi.
+4. **Path-Based Routing (Yola Dayalı Yönlendirme):** Aynı IP/Port üzerinden gelen isteklerin `/elma` ve `/armut` gibi URL eklerine bakılarak farklı mikroservislere (Pod'lara) dağıtılması.
+
+---
+
+## ⚙️ Uygulama Adımları
+
+### 1. Ingress Controller'ın Aktifleştirilmesi
+Terraform ile kurulan K8s (Minikube) sunucusunda, Ingress trafiğini yönetecek Nginx Controller eklentisi yerleşik komutla aktif edildi:
+```bash
+minikube addons enable ingress
+```
+*Arka planda `ingress-nginx` namespace'i altında çalışan controller pod'ları `kubectl get pods -n ingress-nginx` ile doğrulandı.*
+
+### 2. Mikroservislerin (Backend) Kurulumu
+Birbirinden izole çalışan ve sadece K8s içinden erişilebilen (`ClusterIP` türünde) iki farklı web uygulaması (Elma ve Armut) tek bir YAML manifestosuyla (`uygulamalar.yaml`) sisteme yüklendi. 
+
+**`uygulamalar.yaml` İçeriği:**
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: elma-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: elma
+  template:
+    metadata:
+      labels:
+        app: elma
+    spec:
+      containers:
+      - name: elma
+        image: hashicorp/http-echo
+        args: ["-text=Elma sayfasina hosgeldiniz!"]
+        ports:
+        - containerPort: 5678
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: elma-service
+spec:
+  selector:
+    app: elma
+  ports:
+  - port: 5678
+    targetPort: 5678
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: armut-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: armut
+  template:
+    metadata:
+      labels:
+        app: armut
+    spec:
+      containers:
+      - name: armut
+        image: hashicorp/http-echo
+        args: ["-text=Armut sayfasina hosgeldiniz!"]
+        ports:
+        - containerPort: 5678
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: armut-service
+spec:
+  selector:
+    app: armut
+  ports:
+  - port: 5678
+    targetPort: 5678
+```
+
+Manifest dosyasını uygulamak için şu komut kullanıldı:
+```bash
+kubectl apply -f uygulamalar.yaml
+```
+
+### 3. Ingress Yönlendirme Kurallarının Yazılması (`ingress.yaml`)
+Gelen trafikleri ayırt edecek Ingress kuralları tanımlandı ve sisteme uygulandı. Bu yapılandırma ile K8s'e şu talimat verildi:
+* Eğer istek `/elma` yoluna gelirse trafiği `elma-service`'e gönder.
+* Eğer istek `/armut` yoluna gelirse trafiği `armut-service`'e gönder.
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: meyve-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /elma
+        pathType: Prefix
+        backend:
+          service:
+            name: elma-service
+            port:
+              number: 5678
+      - path: /armut
+        pathType: Prefix
+        backend:
+          service:
+            name: armut-service
+            port:
+              number: 5678
+```
+
+### 4. Dış Erişim ve Test
+Minikube'un izole ortamını EC2 sunucusuna bağlamak için Ingress Controller'ın 80 portu dışarıya köprülendi:
+```bash
+kubectl port-forward --address 0.0.0.0 -n ingress-nginx svc/ingress-nginx-controller 30080:80
+```
+*Test sonucunda, tarayıcı üzerinden EC2'nin 30080 portuna bağlanılarak URL sonuna eklenen `/elma` ve `/armut` yolları ile doğru mikroservislere ulaşıldığı başarıyla teyit edildi.*
