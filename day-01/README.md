@@ -32,6 +32,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
 - [ ] **Aşama 4: Orchestration (Kubernetes & Helm)**
   - [X] Day 16: Orchestration - Helm (Kubernetes Paket Yöneticisi)
   - [X] Day 17: Orchestration - Kubernetes Ingress ve Ağ Yönetimi (Path-Based Routing)
+  - [X] Day-18: Orchestration - Kubernetes ConfigMap ve Secrets (Yapılandırma ve Şifre Yönetimi)
 ---
 
 ## 📅 Day 1: Linux Temelleri & Sistem Yönetimi
@@ -1836,3 +1837,73 @@ Minikube'un izole ortamını EC2 sunucusuna bağlamak için Ingress Controller'�
 kubectl port-forward --address 0.0.0.0 -n ingress-nginx svc/ingress-nginx-controller 30080:80
 ```
 *Test sonucunda, tarayıcı üzerinden EC2'nin 30080 portuna bağlanılarak URL sonuna eklenen `/elma` ve `/armut` yolları ile doğru mikroservislere ulaşıldığı başarıyla teyit edildi.*
+
+# 🚀 Gün 18: Orchestration - Kubernetes ConfigMap ve Secrets (Yapılandırma ve Şifre Yönetimi)
+
+Bugün, uygulamalarımızın yapılandırma ayarlarını ve hassas verilerini (şifreler, API anahtarları) Docker imajlarından ve Pod manifestolarından soyutlamayı öğrendik. Modern "12-Factor App" prensiplerine uygun olarak, tehlikesiz ayarlar için **ConfigMap**, şifreli veriler için ise **Secret** objelerini kullanarak bu verileri uygulamamıza (Pod'a) ortam değişkeni (Environment Variable) olarak güvenle enjekte ettik.
+
+---
+
+## 🎯 Günün Öğrenim Hedefleri ve Kazanımları
+
+1. **Yapılandırma Yönetimi (ConfigMap):** Veritabanı URL'si, dil seçenekleri gibi gizlilik gerektirmeyen konfigürasyonların merkezi bir K8s objesi olarak yönetilmesi.
+2. **Hassas Veri Yönetimi (Secrets):** Veritabanı parolaları gibi hassas verilerin `Base64` formatında kriptolanarak K8s sisteminde güvenli bir şekilde (Opaque türünde) saklanması.
+3. **Pod İçi Enjeksiyon:** Oluşturulan ConfigMap ve Secret objelerindeki verilerin, `env` ve `valueFrom` parametreleri ile Pod içerisindeki konteynerlere ortam değişkeni (Environment Variable) olarak dinamik şekilde aktarılması.
+4. **Otomatik Çözümleme (Decoding):** Secret içinde Base64 olarak saklanan şifrenin, Pod içine aktarılırken Kubernetes tarafından otomatik olarak çözülmesi (decode) ve uygulamanın şifreyi açık metin olarak okuyabilmesi.
+
+---
+
+## ⚙️ Uygulama Adımları
+
+### 1. ConfigMap Oluşturulması
+Uygulamanın tehlikesiz ayarlarını tutmak için `configmap.yaml` dosyası oluşturuldu ve K8s'e uygulandı:
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: uygulama-ayarlari
+data:
+  VERITABANI_URL: "mysql-sunucusu.local"
+  DIL: "tr_TR"
+```
+
+### 2. Şifreleme ve Secret Oluşturulması
+Hassas veri olan veritabanı şifresi (`cokgizlisifrem123`) terminal üzerinden Base64 formatına dönüştürülerek (`echo -n "cokgizlisifrem123" | base64`) `secret.yaml` dosyası hazırlandı:
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: veritabani-sifresi
+type: Opaque
+data:
+  DB_SIFRE: Y29rZ2l6bGlzaWZyZW0xMjM=
+```
+
+### 3. Değerlerin Pod'a Enjekte Edilmesi
+Hazırlanan ConfigMap ve Secret objelerini içine çekecek bir test Pod'u (`test-pod.yaml`) yaratıldı:
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: config-test-pod
+spec:
+  containers:
+  - name: test-container
+    image: alpine
+    command: ["sleep", "3600"]
+    env:
+    - name: KULLANILACAK_URL
+      valueFrom:
+        configMapKeyRef:
+          name: uygulama-ayarlari
+          key: VERITABANI_URL
+    - name: KULLANILACAK_SIFRE
+      valueFrom:
+        secretKeyRef:
+          name: veritabani-sifresi
+          key: DB_SIFRE
+```
+
+### 4. Başarım Testi ve Doğrulama
+Pod ayağa kalktıktan sonra `kubectl exec -it config-test-pod -- sh` komutuyla Pod'un terminaline girildi. 
+İçeride `echo $KULLANILACAK_URL` ve `echo $KULLANILACAK_SIFRE` komutları çalıştırılarak, Kubernetes'in Base64 şifresini otomatik çözdüğü ve verileri konteynere başarıyla aktardığı doğrulandı.
