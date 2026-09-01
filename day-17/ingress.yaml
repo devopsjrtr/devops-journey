@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: meyve-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /elma
+        pathType: Prefix
+        backend:
+          service:
+            name: elma-service
+            port:
+              number: 5678
+      - path: /armut
+        pathType: Prefix
+        backend:
+          service:
+            name: armut-service
+            port:
+              number: 5678
