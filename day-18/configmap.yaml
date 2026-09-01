@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: uygulama-ayarlari
+data:
+  VERITABANI_URL: "mysql-sunucusu.local"
+  DIL: "tr_TR"

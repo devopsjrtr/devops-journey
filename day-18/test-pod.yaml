@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: config-test-pod
+spec:
+  containers:
+  - name: test-container
+    image: alpine
+    command: ["sleep", "3600"]
+    env:
+    - name: KULLANILACAK_URL
+      valueFrom:
+        configMapKeyRef:
+          name: uygulama-ayarlari
+          key: VERITABANI_URL
+    - name: KULLANILACAK_SIFRE
+      valueFrom:
+        secretKeyRef:
+          name: veritabani-sifresi
+          key: DB_SIFRE
