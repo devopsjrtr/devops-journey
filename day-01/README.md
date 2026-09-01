@@ -33,6 +33,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [X] Day 16: Orchestration - Helm (Kubernetes Paket Yöneticisi)
   - [X] Day 17: Orchestration - Kubernetes Ingress ve Ağ Yönetimi (Path-Based Routing)
   - [X] Day-18: Orchestration - Kubernetes ConfigMap ve Secrets (Yapılandırma ve Şifre Yönetimi)
+  - [X] Day-19: Orchestration - Kubernetes Kalıcı Depolama (Persistent Volume & PVC)
 ---
 
 ## 📅 Day 1: Linux Temelleri & Sistem Yönetimi
@@ -1907,3 +1908,84 @@ spec:
 ### 4. Başarım Testi ve Doğrulama
 Pod ayağa kalktıktan sonra `kubectl exec -it config-test-pod -- sh` komutuyla Pod'un terminaline girildi. 
 İçeride `echo $KULLANILACAK_URL` ve `echo $KULLANILACAK_SIFRE` komutları çalıştırılarak, Kubernetes'in Base64 şifresini otomatik çözdüğü ve verileri konteynere başarıyla aktardığı doğrulandı.
+
+# 🚀 Gün 19: Orchestration - Kubernetes Kalıcı Depolama (Persistent Volume & PVC)
+
+Bugün, Kubernetes üzerinde çalışan uygulamaların (özellikle veritabanlarının) "ölümlü" (ephemeral) yapısından kaynaklanan veri kaybı riskini nasıl ortadan kaldıracağımızı öğrendik. Depolama (Disk) ile İşlem (Pod) katmanlarını birbirinden ayırarak, uygulamanın çökmesi veya silinmesi durumunda bile verilerin güvenle saklanmasını sağlayan **PV** ve **PVC** mimarisini uygulamalı olarak test ettik.
+
+---
+
+## 🎯 Günün Öğrenim Hedefleri ve Kazanımları
+
+1. **Kalıcı Depolama İhtiyacı:** Pod'ların varsayılan olarak verileri geçici tuttuğunun ve silindiklerinde verilerin de tamamen kaybolduğunun (Stateless yapı) anlaşılması.
+2. **Persistent Volume (PV):** K8s kümesindeki veya buluttaki (AWS EBS vb.) fiziksel depolama alanının (disk) sisteme bir kaynak olarak tanıtılması.
+3. **Persistent Volume Claim (PVC):** Uygulamaların (Pod'ların) diske doğrudan değil, bir talep fişi (PVC) aracılığıyla bağlanarak "Bana X GB alan tahsis et" demesinin mantığının kavranması.
+4. **Kıyamet Senaryosu (Data Persistence):** Oluşturulan PVC'nin Pod'a `volumeMounts` ile bağlanması ve Pod silinip yeniden yaratıldığında bile diske yazılan verilerin hayatta kalmasının (Stateful yapı) test edilmesi.
+
+---
+
+## ⚙️ Uygulama Adımları
+
+### 1. Persistent Volume (PV) Oluşturulması
+Minikube'un kendi içindeki bir dizini (`/mnt/data`) diskmiş gibi kullanarak 1 GB kapasiteli bir PV objesi yaratıldı ve K8s'e uygulandı:
+```yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: my-pv
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: manual
+  hostPath:
+    path: "/mnt/data"
+```
+
+### 2. Talep Fişinin (PVC) Hazırlanması
+Uygulamanın PV'yi kullanabilmesi için bir Persistent Volume Claim (`pvc.yaml`) oluşturuldu. Manifest uygulandıktan sonra diskin durumunun `Bound` (Eşleşti) olduğu teyit edildi:
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: manual
+  resources:
+    requests:
+      storage: 1Gi
+```
+
+### 3. Pod'un Diske Bağlanması ve Veri Yazımı
+Oluşturulan PVC'yi kullanan bir Nginx Pod'u (`pod.yaml`) ayağa kaldırıldı. Burada diskin `/usr/share/nginx/html` dizinine bağlanması sağlandı:
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: veri-test-pod
+spec:
+  containers:
+    - name: web
+      image: nginx
+      volumeMounts:
+        - mountPath: "/usr/share/nginx/html"
+          name: kalici-disk
+  volumes:
+    - name: kalici-disk
+      persistentVolumeClaim:
+        claimName: my-pvc
+```
+Pod çalıştıktan sonra `kubectl exec` ile içine girilerek disk alanına bir HTML dosyası yazıldı:
+```bash
+kubectl exec -it veri-test-pod -- sh -c "echo 'BU VERI ASLA SILINMEZ!' > /usr/share/nginx/html/index.html"
+```
+
+### 4. Kıyamet Testi (Veri Kaybı Simülasyonu)
+Veri kaybını test etmek için `veri-test-pod` objesi kasıtlı olarak silindi (`kubectl delete pod`). Aynı Pod manifest dosyasıyla tekrar yaratıldığında ve içi kontrol edildiğinde, diske yazılan verinin kaybolmadığı başarıyla ispatlandı:
+```bash
+kubectl exec -it veri-test-pod -- cat /usr/share/nginx/html/index.html
+# Başarılı Çıktı: BU VERI ASLA SILINMEZ!
+```
