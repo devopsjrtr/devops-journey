@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kucuk-nginx
+  namespace: dev-ortami  # Pod'u sadece bu izole odaya kurar
+spec:
+  containers:
+  - name: web
+    image: nginx
+    resources:
+      requests:
+        memory: "64Mi"   # Garanti edilen minimum RAM
+        cpu: "250m"      # Garanti edilen minimum CPU (1000m = 1 CPU çekirdeği)
+      limits:
+        memory: "128Mi"  # Aşamayacağı maksimum RAM
+        cpu: "500m"      # Aşamayacağı maksimum CPU
