@@ -35,6 +35,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [X] Day-18: Orchestration - Kubernetes ConfigMap ve Secrets (Yapılandırma ve Şifre Yönetimi)
   - [X] Day-19: Orchestration - Kubernetes Kalıcı Depolama (Persistent Volume & PVC)
   - [X] Day-20: Orchestration - Kubernetes Namespaces ve Resource Limits (İzole Ortamlar ve Kaynak Yönetimi)
+  - [X] Day-21: Orchestration - Kubernetes Liveness ve Readiness Probes (Sağlık Kontrolleri)
 ---
 
 ## 📅 Day 1: Linux Temelleri & Sistem Yönetimi
@@ -2049,3 +2050,68 @@ kubectl get pods -n dev-ortami
 kubectl describe pod kucuk-nginx -n dev-ortami
 ```
 *Çıktıda CPU ve Memory için belirlenen `Requests` ve `Limits` değerlerinin K8s tarafından başarıyla işlendiği doğrulandı.*
+
+# 🚀 Gün 21: Orchestration - Kubernetes Liveness ve Readiness Probes (Sağlık Kontrolleri)
+
+Bugün, Kubernetes'in uygulamalarımızı sadece "çalışıyor" (PID 1) olarak görmesinin ötesine geçerek, uygulamanın "gerçekten sağlıklı ve hizmet vermeye hazır" olup olmadığını nasıl anladığını öğrendik. Uygulamaları körü körüne çalıştırmak yerine **Liveness** ve **Readiness** sondaları (probes) ekleyerek sistemin kendi kendini denetleyen otonom bir yapıya dönüşmesini sağladık. 
+
+Ayrıca, SRE (Site Reliability Engineering) bakış açısıyla her hatada "otomatik reset" atmanın tehlikelerini ve sektördeki öncü firmaların bu durumla nasıl başa çıktığını analiz ettik.
+
+---
+
+## 🎯 Günün Öğrenim Hedefleri ve Kazanımları
+
+1. **Readiness Probe (Hazır Olma Durumu):** Uygulamanın müşteri trafiği almaya hazır olup olmadığını denetleyen mekanizma. Başarısız olursa K8s Pod'u öldürmez, sadece Service'ten (yönlendirmeden) çıkararak trafiği keser.
+2. **Liveness Probe (Hayatta Kalma Durumu):** Uygulamanın kilitlenip kilitlenmediğini (deadlock) denetleyen mekanizma. Başarısız olursa K8s acımasızca Pod'u öldürür ve yeniden başlatır.
+3. **CrashLoopBackOff Analizi:** K8s'in sürekli çöken bir Pod'u "Exponential Backoff" (artan bekleme süreleri) mantığıyla nasıl yönettiğinin gözlemlenmesi.
+
+---
+
+## ⚙️ Uygulama Adımları
+
+### 1. Kaos Simülasyonu (Probes Manifestosu)
+İlk 30 saniye boyunca sağlıklı çalışan, ardından içindeki sağlık dosyasını (`/tmp/saglikli.txt`) silerek içeriden bozulan bir test Pod'u (`probes.yaml`) yaratıldı:
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: saglik-testi-podu
+spec:
+  containers:
+  - name: app
+    image: busybox
+    args:
+    - /bin/sh
+    - -c
+    - "touch /tmp/saglikli.txt && sleep 30 && rm -f /tmp/saglikli.txt && sleep 600"
+    
+    # Doktor 1: Trafik Almaya Hazır Mı?
+    readinessProbe:
+      exec:
+        command: ["cat", "/tmp/saglikli.txt"]
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      
+    # Doktor 2: Uygulama Yaşıyor Mu?
+    livenessProbe:
+      exec:
+        command: ["cat", "/tmp/saglikli.txt"]
+      initialDelaySeconds: 5
+      periodSeconds: 5
+```
+
+### 2. Canlı İzleme ve K8s Müdahalesi
+Manifesto K8s'e uygulandıktan sonra `kubectl get pods -w` komutu ile Pod'un yaşam döngüsü saniye saniye izlendi.
+* İlk aşamada problar başarılı oldu ve Pod `1/1 Running` (Trafik alıyor) durumuna geçti.
+* 30. saniyenin sonunda dosya silinince önce Readiness patladı ve durum `0/1 Running` oldu (Trafik kesildi).
+* Hemen ardından Liveness patladı ve K8s müdahale ederek Pod'u **RESTART** etti. Sistem kendi kendini iyileştirdi.
+
+---
+
+## 💡 SRE (Site Reliability Engineering) ve Endüstri Standartları
+
+Körü körüne "Liveness Probe" eklemek ve sürekli reset atmak sistemleri felakete (Cascading Failure) sürükleyebilir. Endüstri standartlarında şu kurallar uygulanır:
+
+1. **Sorumlulukların Ayrımı (Altın Kural):** Dış bağımlılıklar (Veritabanı, Redis vb.) *asla* Liveness Probe ile kontrol edilmez. Veritabanı yavaşladığında tüm Pod'ların aynı anda resetlenmesini önlemek için bu kontroller sadece Readiness Probe'a bırakılır.
+2. **Gözlemlenebilirlik (Observability):** Sürekli restart eden Pod'lar (CrashLoopBackOff) kaderine terk edilmez. Prometheus/Grafana gibi araçlarla izlenerek, üst üste restart durumunda DevOps ekibine otomatik PagerDuty/Slack alarmları düşürülür.
+3. **Otomatik Rollback:** Sürekli çöken ve sağlık problarını geçemeyen yeni versiyonlar, CI/CD araçları (ArgoCD, Jenkins) tarafından fark edilerek saniyeler içinde bir önceki stabil versiyona otomatik döndürülür.
