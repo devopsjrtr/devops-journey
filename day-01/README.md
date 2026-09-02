@@ -34,6 +34,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [X] Day 17: Orchestration - Kubernetes Ingress ve Ağ Yönetimi (Path-Based Routing)
   - [X] Day-18: Orchestration - Kubernetes ConfigMap ve Secrets (Yapılandırma ve Şifre Yönetimi)
   - [X] Day-19: Orchestration - Kubernetes Kalıcı Depolama (Persistent Volume & PVC)
+  - [X] Day-20: Orchestration - Kubernetes Namespaces ve Resource Limits (İzole Ortamlar ve Kaynak Yönetimi)
 ---
 
 ## 📅 Day 1: Linux Temelleri & Sistem Yönetimi
@@ -1989,3 +1990,62 @@ Veri kaybını test etmek için `veri-test-pod` objesi kasıtlı olarak silindi 
 kubectl exec -it veri-test-pod -- cat /usr/share/nginx/html/index.html
 # Başarılı Çıktı: BU VERI ASLA SILINMEZ!
 ```
+
+# 🚀 Gün 20: Orchestration - Kubernetes Namespaces ve Resource Limits (İzole Ortamlar ve Kaynak Yönetimi)
+
+Bugün, tek bir Kubernetes kümesini (cluster) birden fazla takımın veya ortamın (Dev, Test, Prod) güvenle ve çakışmadan kullanabilmesi için K8s kaynak yönetimini öğrendik. Ayrıca "Gürültücü Komşu" (Noisy Neighbor) problemini önlemek adına, Pod'lara donanım sınırları (CPU ve RAM kotaları) koyarak altyapı güvenliğini ve stabilitesini sağladık.
+
+---
+
+## 🎯 Günün Öğrenim Hedefleri ve Kazanımları
+
+1. **Namespaces (Sanal Kümeler):** Aynı fiziksel K8s kümesi içinde birbirinden tamamen izole sanal alanlar yaratarak, kaynakların ve objelerin (Pod, Service, Secret vb.) birbirine karışmasını engelleme.
+2. **Resource Requests (Garanti Edilen Kaynaklar):** Kubernetes'e "Bu Pod'un çalışabilmesi için sistemde en az şu kadar boş CPU ve RAM olmalı, yoksa Pod'u başlatma (Pending)" deme mantığı.
+3. **Resource Limits (Kaynak Sınırları):** Kötü yazılmış bir kodun bellek sızıntısı (Memory Leak) yaparak tüm sunucuyu çökertmesini engellemek için Pod'a üst sınırlar koyma ve sınırı aşarsa Pod'un sistem tarafından öldürülmesi (OOMKilled) mekanizması.
+4. **Namespace Bazlı Sorgulama:** Varsayılan olarak `default` alanında çalışan `kubectl` komutlarını, `-n` parametresi ile spesifik izole alanlara yönlendirme.
+
+---
+
+## ⚙️ Uygulama Adımları
+
+### 1. Sanal Kümelerin (Namespaces) Oluşturulması
+Farklı ortamları simüle etmek için Geliştirme (`dev-ortami`) ve Canlı (`prod-ortami`) adında iki farklı namespace yaratıldı:
+```bash
+kubectl create namespace dev-ortami
+kubectl create namespace prod-ortami
+# Oluşturulan alanlar şu komutla teyit edildi:
+kubectl get namespaces
+```
+
+### 2. Kaynak Sınırları Tanımlanmış Pod Manifestosu
+`dev-ortami` namespace'inde çalışacak ve maksimum 128MB RAM / 0.5 CPU kullanabilecek şekilde sınırlandırılmış bir Nginx manifestosu (`sinirli-pod.yaml`) hazırlandı:
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kucuk-nginx
+  namespace: dev-ortami
+spec:
+  containers:
+  - name: web
+    image: nginx
+    resources:
+      requests:
+        memory: "64Mi"   # K8s'ten garanti istenen minimum RAM
+        cpu: "250m"      # K8s'ten garanti istenen minimum CPU (250 millicores = 0.25 CPU)
+      limits:
+        memory: "128Mi"  # Pod'un aşamayacağı maksimum RAM limiti
+        cpu: "500m"      # Pod'un aşamayacağı maksimum CPU limiti (0.5 CPU)
+```
+*(Bu manifest dosyası `kubectl apply -f sinirli-pod.yaml` komutu ile sisteme uygulandı).*
+
+### 3. İzole Alanda Gözlem ve Doğrulama
+Pod, varsayılan alanda olmadığı için standart `get pods` komutuyla görünmedi. Belirli bir namespace'i sorgulamak ve atanan sınırları doğrulamak için şu komutlar kullanıldı:
+```bash
+# Sadece dev-ortami içindeki podları listeler:
+kubectl get pods -n dev-ortami
+
+# Pod'a atanan kotaları ve sınırları (Limits/Requests) detaylıca inceler:
+kubectl describe pod kucuk-nginx -n dev-ortami
+```
+*Çıktıda CPU ve Memory için belirlenen `Requests` ve `Limits` değerlerinin K8s tarafından başarıyla işlendiği doğrulandı.*
