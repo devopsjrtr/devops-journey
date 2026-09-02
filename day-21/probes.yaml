@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: saglik-testi-podu
+spec:
+  containers:
+  - name: app
+    image: busybox
+    # Pod açılınca bir dosya yaratır, 30sn bekler, dosyayı siler ve uyumaya devam eder.
+    args:
+    - /bin/sh
+    - -c
+    - "touch /tmp/saglikli.txt && sleep 30 && rm -f /tmp/saglikli.txt && sleep 600"
+    
+    # Doktor 1: Hazır mı? (Dosya var mı?)
+    readinessProbe:
+      exec:
+        command:
+        - cat
+        - /tmp/saglikli.txt
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      
+    # Doktor 2: Hayatta mı? (Dosya var mı?)
+    livenessProbe:
+      exec:
+        command:
+        - cat
+        - /tmp/saglikli.txt
+      initialDelaySeconds: 5
+      periodSeconds: 5
