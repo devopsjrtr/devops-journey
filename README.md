@@ -36,6 +36,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [X] Day-19: Orchestration - Kubernetes Kalıcı Depolama (Persistent Volume & PVC)
   - [X] Day-20: Orchestration - Kubernetes Namespaces ve Resource Limits (İzole Ortamlar ve Kaynak Yönetimi)
   - [X] Day-21: Orchestration - Kubernetes Liveness ve Readiness Probes (Sağlık Kontrolleri)
+  - [X] Day-22: AWS EKS Kurulumu, IAM Yapılandırması, Node Group ve FinOps (Maliyet Yönetimi)
 ---
 
 ## 📅 Day 1: Linux Temelleri & Sistem Yönetimi
@@ -2115,3 +2116,180 @@ Körü körüne "Liveness Probe" eklemek ve sürekli reset atmak sistemleri fela
 1. **Sorumlulukların Ayrımı (Altın Kural):** Dış bağımlılıklar (Veritabanı, Redis vb.) *asla* Liveness Probe ile kontrol edilmez. Veritabanı yavaşladığında tüm Pod'ların aynı anda resetlenmesini önlemek için bu kontroller sadece Readiness Probe'a bırakılır.
 2. **Gözlemlenebilirlik (Observability):** Sürekli restart eden Pod'lar (CrashLoopBackOff) kaderine terk edilmez. Prometheus/Grafana gibi araçlarla izlenerek, üst üste restart durumunda DevOps ekibine otomatik PagerDuty/Slack alarmları düşürülür.
 3. **Otomatik Rollback:** Sürekli çöken ve sağlık problarını geçemeyen yeni versiyonlar, CI/CD araçları (ArgoCD, Jenkins) tarafından fark edilerek saniyeler içinde bir önceki stabil versiyona otomatik döndürülür.
+
+## 📅 Day 22: AWS EKS Kurulumu, IAM Yapılandırması, Node Group ve FinOps (Maliyet Yönetimi)
+
+> 🎯 **Günün Amacı:** Terraform kullanarak AWS üzerinde sıfırdan bir VPC kurgulamak, EKS (Elastic Kubernetes Service) cluster'ının ihtiyaç duyduğu özel IAM (Kimlik ve Erişim Yönetimi) rollerini manuel oluşturmak, Node Group'ları ayağa kaldırmak ve bulut maliyetlerini yönetmek (FinOps) için AWS Bütçe Alarmı yapılandırmak.
+
+### 📚 Özet Ders Notu
+
+Kubernetes kümesini (EKS) AWS üzerinde hazır bir sihirbazla kurmak yerine, perde arkasında nelerin çalıştığını anlamak için tüm altyapıyı bileşenlerine ayırdık. Bu laboratuvarda; EKS kümesinin AWS servisleriyle konuşabilmesi için **Cluster IAM Rolünü**, Worker Node'ların (EC2) ağ ve container kayıt defterine (ECR) erişebilmesi için **Node IAM Rolünü** ve kaynak tüketimini yönetecek olan **Node Group** yapılandırmasını ayrı Terraform dosyaları olarak kodladık. İşimiz bittiğinde ise FinOps prensipleri gereği tüm altyapıyı tek komutla temizleyip maliyet kontrolünü sağladık.
+
+---
+
+### 🛠️ Hands-On Lab: EKS Altyapısı, IAM Roller ve FinOps Pratiği
+
+#### 1. Terraform Ağ ve Sağlayıcı Yapılandırması (`provider.tf` & `vpc.tf`)
+
+Mimarimizi yüksek erişilebilirlik (HA) adına iki farklı Availability Zone'a yaydık.
+
+**`provider.tf`**
+```hcl
+provider "aws" {
+  region = "us-east-1"
+} 
+```
+**`vpc.tf`**
+```
+module "vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 5.0"
+
+  name = "devops-journey-vpc"
+  cidr = "10.0.0.0/16"
+
+  azs             = ["us-east-1a", "us-east-1b"]
+  private_subnets = ["10.0.1.0/24", "10.0.2.0/24"]
+  public_subnets  = ["10.0.101.0/24", "10.0.102.0/24"]
+
+  # Worker Node'ların internete çıkabilmesi için NAT Gateway
+  enable_nat_gateway = true
+  single_nat_gateway = true 
+  
+  tags = {
+    "kubernetes.io/cluster/devops-journey-cluster" = "shared"
+  }
+}
+```
+
+#### 2. IAM Rolleri ve İzinlerin Oluşturulması (iam.tf)
+EKS'in ve EC2 sunucularının (Worker Nodes) AWS içinde yetkilendirilebilmesi için gerekli olan rol ve politikalar:
+
+```
+# 1. EKS Cluster için IAM Rolü (Control Plane)
+resource "aws_iam_role" "eks_cluster_role" {
+  name = "eks-cluster-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = { Service = "eks.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+  role       = aws_iam_role.eks_cluster_role.name
+}
+
+# 2. Worker Node'lar için IAM Rolü (EC2 Instances)
+resource "aws_iam_role" "eks_node_role" {
+  name = "eks-node-group-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+}
+
+# Worker Node'ların ihtiyaç duyduğu 3 temel AWS politikası
+resource "aws_iam_role_policy_attachment" "eks_worker_node_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+  role       = aws_iam_role.eks_node_role.name
+}
+
+resource "aws_iam_role_policy_attachment" "eks_cni_policy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+  role       = aws_iam_role.eks_node_role.name
+}
+
+resource "aws_iam_role_policy_attachment" "eks_container_registry_readonly" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+  role       = aws_iam_role.eks_node_role.name
+}
+```
+
+#### 3. EKS Cluster Oluşturulması (eks-cluster.tf)
+Oluşturduğumuz IAM rolünü kullanarak EKS Control Plane'i (Yönetim Düzlemini) ayağa kaldırıyoruz:
+
+```
+resource "aws_eks_cluster" "devops_journey_cluster" {
+  name     = "devops-journey-cluster"
+  role_arn = aws_iam_role.eks_cluster_role.arn
+  version  = "1.30"
+
+  vpc_config {
+    subnet_ids = module.vpc.private_subnets
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_cluster_policy
+  ]
+}
+```
+
+#### 4. EKS Node Group Oluşturulması (eks-node-group.tf)  
+Uygulamalarımızın (Pod'larımızın) üzerinde koşacağı fiziksel kaynakları (t3.medium) ve scaling (ölçeklendirme) kapasitesini tanımlıyoruz:
+
+```
+resource "aws_eks_node_group" "general" {
+  cluster_name    = aws_eks_cluster.devops_journey_cluster.name
+  node_group_name = "general-node-group"
+  node_role_arn   = aws_iam_role.eks_node_role.arn
+  subnet_ids      = module.vpc.private_subnets
+
+  scaling_config {
+    desired_size = 1
+    max_size     = 2
+    min_size     = 1
+  }
+
+  instance_types = ["t3.medium"]
+
+  # IAM rol atamaları tamamlanmadan Node Group oluşturulmasın!
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_worker_node_policy,
+    aws_iam_role_policy_attachment.eks_cni_policy,
+    aws_iam_role_policy_attachment.eks_container_registry_readonly,
+  ]
+}
+```
+
+#### 5. Altyapıyı Ayağa Kaldırma (Deployment Adımları)
+Tüm TF dosyalarımızı derlemek ve AWS üzerinde inşa etmek için:
+
+```
+terraform init
+terraform plan
+terraform apply --auto-approve
+```
+
+#### 6. EKS'e Bağlanma ve Doğrulama
+Cluster ayağa kalktıktan sonra kubectl ile yönetebilmek için makinemizi yapılandırıyoruz:
+
+```
+aws eks update-kubeconfig --region us-east-1 --name devops-journey-cluster
+kubectl get nodes
+```
+
+#### 7. FinOps: Altyapı Temizliği (Teardown)
+Maliyet yazmaması için test bittiğinde kaynaklar anında silinmelidir:
+
+```
+terraform destroy --auto-approve
+```
+
+## 💡 Troubleshooting: 
+Eğer AWS Management Console'dan manuel silme yaptıysanız ve terraform destroy hata verirse, dizindeki .terraform klasörünü ve terraform.tfstate dosyalarını silerek state hafızasını sıfırlayabilirsiniz.
+
+#### 8. AWS Bütçe Alarmı (Billing Alarms) Kurulumu
+AWS Console -> Billing and Cost Management -> Budgets
+
+Monthly cost budget (Aylık maliyet bütçesi) seçildi.
+
+Limit $10 olarak belirlendi ve uyarı e-postası eklendi.
