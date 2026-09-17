@@ -37,6 +37,9 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [X] Day-20: Orchestration - Kubernetes Namespaces ve Resource Limits (İzole Ortamlar ve Kaynak Yönetimi)
   - [X] Day-21: Orchestration - Kubernetes Liveness ve Readiness Probes (Sağlık Kontrolleri)
   - [X] Day-22: AWS EKS Kurulumu, IAM Yapılandırması, Node Group ve FinOps (Maliyet Yönetimi)
+- [ ] **Aşama 5: CI/CD Pipeline Otomasyonu - 2 (Pull Tabanlı GitOps)**
+	- [X] Day-23: ArgoCD Kurulumu ve GitOps Mimarisine Giriş
+ 	- [ ] Day 24: İlk GitOps Deployment'ı ve Jenkins-ArgoCD Entegrasyonu
 ---
 
 ## 📅 Day 1: Linux Temelleri & Sistem Yönetimi
@@ -2293,3 +2296,48 @@ AWS Console -> Billing and Cost Management -> Budgets
 Monthly cost budget (Aylık maliyet bütçesi) seçildi.
 
 Limit $10 olarak belirlendi ve uyarı e-postası eklendi.
+
+## 📅 Day 23: ArgoCD ile GitOps Mimarisine Giriş
+
+> 🎯 **Günün Amacı:** CI/CD boru hattımızın dağıtım (Deployment) aşamasını evrimleştirerek GitOps felsefesine geçiş yapmak ve Kubernetes yönetiminde endüstri standardı olan ArgoCD'nin kurulumunu Minikube üzerinde tamamlamak.
+
+### 📚 Özet Ders Notu
+GitOps Nedir?: Sistemin istenen durumu (Desired State) ile mevcut durumunun (Actual State) tek ve mutlak doğruluğunun (Single Source of Truth) Git reposu olarak kabul edildiği operasyonel modeldir.
+
+Push vs. Pull Deployments:
+
+Geleneksel (Push): Jenkins'in dışarıdan Kubernetes'e bağlanarak yetkilerle komut koşturması.
+
+GitOps (Pull): Jenkins'in sadece Git reposunu güncellemesi, K8s içindeki ArgoCD'nin bu Git reposunu dinleyerek değişiklikleri içeri (pull) çekip uygulaması.
+
+Güvenlik İzolasyonu: K8s cluster'ının dış dünyadan komut alma zorunluluğu ortadan kalktı; yetkiler dışarı sızdırılmadan cluster içerisinden yönetilmeye başlandı.
+
+### 🛠️ Hands-On Lab: ArgoCD Kurulumu ve Arayüz Erişimi
+
+#### 1. ArgoCD'yi Cluster'a Kurma
+ArgoCD bileşenlerinin K8s içinde kendi özel alanında (namespace) çalışması için ortamı hazırladık:
+
+```bash
+# argocd namespace oluşturma
+kubectl create namespace argocd
+
+# Resmi ArgoCD manifest'lerinin uygulanması
+kubectl apply -n argocd -f [https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml](https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml)
+
+# Pod'ların Running statüsüne geçmesini bekleme
+kubectl get pods -n argocd -w
+```
+
+#### 2. İlk Giriş ve Port Yönlendirme (Port-Forwarding)
+Arayüze erişebilmek için varsayılan olarak gizlenmiş admin şifresini çıkardık ve yerel ağımıza yönlendirdik:
+
+```bash
+# İlk admin şifresini Secret içinden çıkartma
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo
+
+# UI'a erişim için Port-Forward başlatma
+kubectl port-forward svc/argocd-server -n argocd 8080:443
+```
+
+## 🌐 Arayüz Erişimi: 
+Tarayıcıdan https://localhost:8080 adresine gidildi. Kullanıcı adı admin, şifre ise terminalden kopyalanan değer olarak kullanıldı.
