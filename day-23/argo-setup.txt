@@ -1,0 +1,15 @@
+```bash
+# 1. Namespace oluşturma
+kubectl create namespace argocd
+
+# 2. Resmi ArgoCD manifest'lerinin uygulanması
+kubectl apply -n argocd -f [https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml](https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml)
+
+# 3. Pod'ların hazır olmasını bekleme
+kubectl get pods -n argocd -w
+
+# 4. İlk admin şifresini Secret içinden çıkartma
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo
+
+# 5. UI'a erişim için Port-Forward
+kubectl port-forward svc/argocd-server -n argocd 8080:443
