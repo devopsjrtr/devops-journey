@@ -1,20 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: my-python-app
+  name: my-app
   namespace: default
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: my-python-app
+      app: my-app
   template:
     metadata:
       labels:
-        app: my-python-app
+        app: my-app
     spec:
       containers:
-      - name: my-python-app
-        image: localhost:8083/my-python-app:build-1 # <-- Jenkins buraya müdahale edecek
+      - name: my-app
+        image: osmansaygili/my-app:latest # <-- Jenkins buraya müdahale edecek
         ports:
         - containerPort: 5000
