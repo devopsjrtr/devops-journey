@@ -27,6 +27,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [X] Day 11: Infrastructure as Code (IaC) Dünyasına Giriş - Terraform Temelleri
   - [X] Day 12: Terraform'da Değişkenler, Çıktılar ve Otomatik Kurulum (User Data)
   - [X] Day 13: Configuration Management - Ansible ve Terraform Entegrasyonu
+  - [X] Day-11-13 Local - Terraform, Ansible Kurulum ve Entegrasyonlarının Yerelde Yapılması
   - [X] Day 14: Orchestration - Kubernetes Temelleri ve Cluster Kurulumu
   - [X] Day 15: Orchestration - Kubernetes Deployment ve ReplicaSet Mimarisi
 - [ ] **Aşama 4: Orchestration (Kubernetes & Helm)**
@@ -1520,6 +1521,144 @@ export ANSIBLE_HOST_KEY_CHECKING=False
 ansible-playbook -i hosts nginx.yml
 ```
 *İşlem sonucunda Terraform'un verdiği IP adresine tarayıcıdan gidilerek Nginx sayfasının başarıyla yayınlandığı doğrulandı.*
+
+# 🚀 Gün 11-13 (Local): Docker Üzerinde Terraform ve Ansible Simülasyonu
+
+Evdeki lokal sanal makine (WSL/Ubuntu) ortamımızda, bulut maliyetlerinden kaçınmak ve IaC pratiklerimizi test etmek için hedef sunucuyu **Docker konteyneri** olarak modelledik. Terraform ile bir Ubuntu konteyneri ayağa kaldırıp, Ansible ile içine Nginx kurarak süreçleri tamamen lokalde simüle ettik.
+
+## ⚙️ Ön Gereksinimler
+
+### 1. Terraform Kurulumu
+Terraform'un her zaman en güncel sürümünü çekmek için HashiCorp'un resmi depo anahtarını sistemimize ekleyip kurulumu yapıyoruz:
+
+```bash
+# Gerekli bağımlılıkları yükle
+sudo apt-get update && sudo apt-get install -y gnupg software-properties-common curl
+
+# HashiCorp GPG anahtarını indir ve sisteme ekle
+curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+
+# HashiCorp deposunu kaynak listesine ekle
+echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+
+# Depoları güncelle ve Terraform'u kur
+sudo apt-get update && sudo apt-get install terraform -y
+```
+
+### 2. Ansible Kurulumu
+
+```bash
+# PPA depolarını yönetebilmek için aracı kur
+sudo apt-get update && sudo apt-get install -y software-properties-common
+
+# Ansible resmi deposunu ekle
+sudo add-apt-repository --yes --update ppa:ansible/ansible
+
+# Ansible'ı kur
+sudo apt-get install -y ansible
+```
+
+### 3.Docker Yetki Kontrolü
+Terraform kodumuz arka planda docker sağlayıcısını kullanacağı için, makinenin üzerinde Docker kurulu olması ve mevcut kullanıcının Docker'ı sudo olmadan çalıştırabilmesi şart.
+
+Terminalde docker ps komutunu çalıştırılır. Eğer permission denied hatası alınıyorsa, şu komutlarla yetki verilir:
+
+```bash
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+## 📁 1. Terraform Yapılandırması (`main.tf`)
+Docker sağlayıcısını kullanarak hedef sunucu görevi görecek bir konteyner oluşturduk ve `null_resource` ile Ansible playbook'umuzu tetikledik.
+
+```hcl
+terraform {
+  required_providers {
+    docker = {
+      source  = "kreuzwerker/docker"
+      version = "~> 3.0.0"
+    }
+  }
+}
+
+provider "docker" {}
+
+# Ubuntu imajını lokalimize indiriyoruz
+resource "docker_image" "ubuntu" {
+  name         = "ubuntu:latest"
+  keep_locally = true
+}
+
+# EC2 yerine geçecek olan Docker Container'ımız
+resource "docker_container" "hedef_sunucu" {
+  image = docker_image.ubuntu.image_id
+  name  = "local-target-server"
+
+  # Container'ın hemen kapanmaması için sonsuz bir uyku döngüsüne sokuyoruz
+  command = ["tail", "-f", "/dev/null"]
+}
+
+# Container oluştuktan sonra Ansible'ı tetikleyen entegrasyon bloğu
+resource "null_resource" "run_ansible" {
+  # Önce container'ın ayağa kalkmasını bekle
+  depends_on = [docker_container.hedef_sunucu]
+
+  provisioner "local-exec" {
+    # Container hazır olduğunda playbook'u çalıştır
+    command = "ansible-playbook -i inventory.ini playbook.yml"
+  }
+}
+```
+
+## 📁 2. Ansible Envanter Dosyası (inventory.ini)
+Ansible'ın AWS'deki makinelere bağlanması için SSH anahtarları (PEM) kullanmıştık. Lokalde container kullandığımız için Ansible'ın harika bir özelliği olan ansible_connection=docker parametresini kullanacağız. Böylece SSH derdi olmadan doğrudan container'a bağlanabileceğiz. 
+
+Terraform'un oluşturduğu konteynere(local-target-server), dışarıdan erişebilmesi için, Ansible'ı yönlendirdiğimiz envanter dosyası:
+
+```ini
+[webservers]
+local-target-server ansible_connection=docker
+```
+
+## 📁 3. Ansible Playbook (playbook.yml)
+Hedef konteynere bağlanıp Nginx kurulumunu otomatize eden yapılandırma dosyası.
+
+```yaml
+- name: Lokal sunucuya Nginx kurulumu
+  hosts: webservers
+  gather_facts: no # Başlangıçta Python olmadığı için fact toplamayı kapatıyoruz
+
+  pre_tasks:
+    - name: Ansible modülleri için Python3 kur (Ubuntu imajında varsayılan gelmez)
+      raw: apt-get update && apt-get install -y python3
+      changed_when: false
+
+  tasks:
+    - name: Nginx paketini kur
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
+```
+
+Bu dosyaları hazırladıktan sonra klasik Terraform döngümüzü çalıştırıyoruz:
+
+```hcl
+terraform init (Docker provider'ını indirir)
+terraform apply -auto-approve
+```
+
+Terraform önce Ubuntu imajını çekecek, container'ı başlatacak, ardından local-exec sayesinde Ansible'ı tetikleyecek ve Ansible gidip o container'ın içine Nginx'i kuracak.
+
+Terraform işlemi başarıyla bitirdikten sonra, Ansible'ın gerçekten o "yeni sunucuya" gidip Nginx kurup kurmadığını test edelim. Terraform'un yarattığı container'ın içine dışarıdan bir komut göndererek Nginx'in versiyonunu soralım:
+
+```bash
+docker exec local-target-server nginx -v
+```
+
+Çıktıda nginx version: nginx/1.18.0 (Ubuntu) gibi bir versiyon numarası görünüyorsa, otomasyon kusursuz çalışmış demektir!
+
+İşte bulutta (AWS/EC2) yaptığımız işlemin, evdeki sanal makinede (Lokal/Docker) %100 aynı mantıkla çalışan hali tam olarak budur. 🎉
 
 # 🚀 Gün 14: Orchestration - Kubernetes Temelleri ve Cluster Kurulumu
 
