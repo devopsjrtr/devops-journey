@@ -1,0 +1,15 @@
+- name: Lokal sunucuya Nginx kurulumu
+  hosts: webservers
+  gather_facts: no # Başlangıçta Python olmadığı için fact toplamayı kapatıyoruz
+  
+  pre_tasks:
+    - name: Ansible modülleri için Python3 kur (Ubuntu imajında varsayılan gelmez)
+      raw: apt-get update && apt-get install -y python3
+      changed_when: false
+
+  tasks:
+    - name: Nginx paketini kur
+      apt:
+        name: nginx
+        state: present
+        update_cache: yes
