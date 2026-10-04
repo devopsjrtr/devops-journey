@@ -11,7 +11,7 @@ pipeline {
         DOCKER_IMAGE = "${IMAGE_NAME}:${IMAGE_TAG}"
         
         // Nexus Registry adresi
-        NEXUS_REPO = "localhost:8083"
+        NEXUS_REPO = "host.minikube.internal:8083"
         FULL_IMAGE = "${NEXUS_REPO}/${DOCKER_IMAGE}"
 
         // Dosyalarının bulunduğu alt klasör yolu
