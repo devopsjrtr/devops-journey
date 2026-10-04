@@ -1,0 +1,43 @@
+pipeline {
+    agent any
+
+    environment {
+        // Nexus kullanmadığımız için örnek bir imaj adı belirliyoruz
+        DOCKER_IMAGE = "osmansaygili/my-app" 
+        GIT_CREDENTIAL_ID = "github-gitops-token"
+        // Kendi GitHub reponun adresi
+        GITHUB_REPO = "github.com/devopsjrtr/devops-journey.git" 
+    }
+
+    stages {
+        stage('Build Image') {
+            steps {
+                // Uygulama dizininde bir Dockerfile olduğunu varsayarak imajı derliyoruz
+                echo "Docker imajı derleniyor: ${DOCKER_IMAGE}:${BUILD_NUMBER}"
+                sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
+            }
+        }
+
+        stage('Update Manifest & Push to Git') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: "${GIT_CREDENTIAL_ID}", passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
+                    sh """
+                        # 1. Jenkins için Git kimlik bilgilerini tanımla
+                        git config user.email "jenkins@devops-journey.local"
+                        git config user.name "Jenkins CI"
+
+                        # 2. k8s/deployment.yaml içindeki eski imajı yenisiyle (BUILD_NUMBER) değiştir
+                        sed -i "s|image: ${DOCKER_IMAGE}:.*|image: ${DOCKER_IMAGE}:${BUILD_NUMBER}|g" day-24/deployment.yaml
+
+                        # 3. Değişikliği commit et (Sonsuz döngüyü engellemek için [skip ci] ekliyoruz)
+                        git add day-24/deployment.yaml
+                        git commit -m "ci: Update deployment image to build-${BUILD_NUMBER} [skip ci]"
+
+                        # 4. Değişiklikleri GitHub'a gönder
+                        git push https://${GIT_USERNAME}:${GIT_PASSWORD}@${GITHUB_REPO} HEAD:main
+                    """
+                }
+            }
+        }
+    }
+}

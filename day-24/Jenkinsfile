@@ -2,42 +2,117 @@ pipeline {
     agent any
 
     environment {
-        // Nexus kullanmadığımız için örnek bir imaj adı belirliyoruz
-        DOCKER_IMAGE = "osmansaygili/my-app" 
+        // VPC'deki sonar'da my-python-app şeklinde proje adı verildiği ve aşağıda direkt adı ile
+        // tanımlandığı için, buradaki definition yorum satırına çekilmiştir. APP_NAME = 'python-flask-app'
+        
+        // ArgoCD'nin değişiklikleri algılaması için dinamik etiket (BUILD_NUMBER) eklendi
+        IMAGE_NAME = 'my-python-app'
+        IMAGE_TAG = "build-${BUILD_NUMBER}"
+        DOCKER_IMAGE = "${IMAGE_NAME}:${IMAGE_TAG}"
+        
+        // Nexus Registry adresi
+        NEXUS_REPO = "localhost:8083"
+        FULL_IMAGE = "${NEXUS_REPO}/${DOCKER_IMAGE}"
+
+        // Dosyalarının bulunduğu alt klasör yolu
+        WORK_DIR = 'day-24/'
+        
+        // GitOps Entegrasyonu için
+        GITHUB_REPO = "github.com/devopsjrtr/devops-journey.git"
         GIT_CREDENTIAL_ID = "github-gitops-token"
-        // Kendi GitHub reponun adresi
-        GITHUB_REPO = "github.com/devopsjrtr/devops-journey.git" 
     }
 
     stages {
-        stage('Build Image') {
+        stage('Checkout') {
             steps {
-                // Uygulama dizininde bir Dockerfile olduğunu varsayarak imajı derliyoruz
-                echo "Docker imajı derleniyor: ${DOCKER_IMAGE}:${BUILD_NUMBER}"
-                sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} ."
+                checkout scm // Kodu workspace'e almak için zorunlu adım
+                echo "Kod GitHub deposundan çekildi."
+                sh 'ls -la'
             }
         }
 
-        stage('Update Manifest & Push to Git') {
+        stage('SonarQube Analysis') {
+            steps {
+                script {
+                    dir("${WORK_DIR}") {
+                        withCredentials([string(credentialsId: 'sonar-token', variable: 'MY_SONAR_TOKEN')]) {
+                            echo 'SonarQube Statik Kod Analizi Başlatılıyor...'
+                            sh 'chmod -R 777 .'
+                            sh 'docker run --rm --net cicd-net -e SONAR_TOKEN=' + MY_SONAR_TOKEN + ' --volumes-from jenkins -w "' + WORKSPACE + '/day-24" sonarsource/sonar-scanner-cli -Dsonar.host.url=http://sonarqube:9000 -Dsonar.projectKey=my-python-app -Dsonar.sources=.'
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                // Docker build komutunu ilgili klasörün içinde çalıştırıyoruz
+                dir("${WORK_DIR}") {
+                    echo "Docker İmajı Build Ediliyor: ${DOCKER_IMAGE}"
+                    sh "docker build -t ${DOCKER_IMAGE} ."
+                }
+            }
+        }
+        
+        stage('Push Docker Image to Nexus') {
+            steps {
+                echo 'Docker İmajı Nexus Repository Manager adresine yükleniyor...'
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                        sh """
+                            echo "Nexus'a login olunuyor..."
+                            docker login -u \${NEXUS_USER} -p \${NEXUS_PASS} ${NEXUS_REPO}
+
+                            echo "İmaj Nexus formatında etiketleniyor..."
+                            docker tag ${DOCKER_IMAGE} ${FULL_IMAGE}
+                            
+                            echo "İmaj Nexus'a pushlanıyor..."
+                            docker push ${FULL_IMAGE}
+                        """
+                    }
+                }
+            }
+        }       
+        
+        stage('Test & Verify') {
+            steps {
+                echo 'Uygulama İmajı Doğrulanıyor...'
+                sh "docker images | grep ${IMAGE_NAME}"
+            }
+        }
+
+        stage('Update Manifest & Push to GitHub (GitOps)') {
             steps {
                 withCredentials([usernamePassword(credentialsId: "${GIT_CREDENTIAL_ID}", passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
                     sh """
-                        # 1. Jenkins için Git kimlik bilgilerini tanımla
+                        echo "Jenkins Git kimliği tanımlanıyor..."
                         git config user.email "jenkins@devops-journey.local"
                         git config user.name "Jenkins CI"
 
-                        # 2. k8s/deployment.yaml içindeki eski imajı yenisiyle (BUILD_NUMBER) değiştir
-                        sed -i "s|image: ${DOCKER_IMAGE}:.*|image: ${DOCKER_IMAGE}:${BUILD_NUMBER}|g" day-24/deployment.yaml
+                        echo "k8s/deployment.yaml içindeki imaj versiyonu güncelleniyor..."
+                        sed -i "s|image: ${NEXUS_REPO}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|g" day-24/deployment.yaml
 
-                        # 3. Değişikliği commit et (Sonsuz döngüyü engellemek için [skip ci] ekliyoruz)
-                        git add day-24/deployment.yaml
-                        git commit -m "ci: Update deployment image to build-${BUILD_NUMBER} [skip ci]"
-
-                        # 4. Değişiklikleri GitHub'a gönder
-                        git push https://${GIT_USERNAME}:${GIT_PASSWORD}@${GITHUB_REPO} HEAD:main
+                        echo "Değişiklik commit ediliyor ve GitHub'a pushlanıyor..."
+                        git add k8s/deployment.yaml
+                        git commit -m "ci: Update deployment image to ${IMAGE_TAG} [skip ci]"
+                        
+                        git push https://${GIT_USERNAME}:\${GIT_PASSWORD}@${GITHUB_REPO} HEAD:main
                     """
                 }
             }
+        }
+    }
+
+    post {
+        always {
+            echo 'Pipeline tamamlandı.'
+        }
+        success {
+            echo 'Tebrikler! Kod alındı, analiz edildi, imaj Nexus'a aktarıldı ve ArgoCD manifestosu güncellendi.'
+        }
+        failure {
+            echo 'Hata! Pipeline bir adımda başarısız oldu.'
         }
     }
 }
