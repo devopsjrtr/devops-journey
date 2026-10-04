@@ -90,11 +90,11 @@ pipeline {
                         git config user.email "jenkins@devops-journey.local"
                         git config user.name "Jenkins CI"
 
-                        echo "k8s/deployment.yaml içindeki imaj versiyonu güncelleniyor..."
+                        echo "day-24/deployment.yaml içindeki imaj versiyonu güncelleniyor..."
                         sed -i "s|image: ${NEXUS_REPO}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|g" day-24/deployment.yaml
 
                         echo "Değişiklik commit ediliyor ve GitHub'a pushlanıyor..."
-                        git add k8s/deployment.yaml
+                        git add day-24/deployment.yaml
                         git commit -m "ci: Update deployment image to ${IMAGE_TAG} [skip ci]"
                         
                         git push https://${GIT_USERNAME}:\${GIT_PASSWORD}@${GITHUB_REPO} HEAD:main
