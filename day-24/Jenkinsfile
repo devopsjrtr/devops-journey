@@ -10,9 +10,13 @@ pipeline {
         IMAGE_TAG = "build-${BUILD_NUMBER}"
         DOCKER_IMAGE = "${IMAGE_NAME}:${IMAGE_TAG}"
         
-        // Nexus Registry adresi
-        NEXUS_REPO = "host.minikube.internal:8083"
-        FULL_IMAGE = "${NEXUS_REPO}/${DOCKER_IMAGE}"
+        // Jenkins'in imajı pushlayacağı adres (localhost üzerinden)
+        NEXUS_PUSH_REPO = "localhost:8083"
+        PUSH_IMAGE = "${NEXUS_PUSH_REPO}/${DOCKER_IMAGE}"
+        
+        // Minikube'un (ArgoCD) imajı çekeceği adres (host.minikube.internal üzerinden)
+        NEXUS_PULL_REPO = "host.minikube.internal:8083"
+        PULL_IMAGE = "${NEXUS_PULL_REPO}/${DOCKER_IMAGE}"
 
         // Dosyalarının bulunduğu alt klasör yolu
         WORK_DIR = 'day-24/'
@@ -62,13 +66,14 @@ pipeline {
                     withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
                         sh """
                             echo "Nexus'a login olunuyor..."
-                            docker login -u \${NEXUS_USER} -p \${NEXUS_PASS} ${NEXUS_REPO}
+                            // Jenkins, localhost:8083 (Push Repo) kullanıyor
+                            docker login -u \${NEXUS_USER} -p \${NEXUS_PASS} ${NEXUS_PUSH_REPO}
 
                             echo "İmaj Nexus formatında etiketleniyor..."
-                            docker tag ${DOCKER_IMAGE} ${FULL_IMAGE}
+                            docker tag ${DOCKER_IMAGE} ${PUSH_IMAGE}
                             
                             echo "İmaj Nexus'a pushlanıyor..."
-                            docker push ${FULL_IMAGE}
+                            docker push ${PUSH_IMAGE}
                         """
                     }
                 }
@@ -91,7 +96,8 @@ pipeline {
                         git config user.name "Jenkins CI"
 
                         echo "day-24/deployment.yaml içindeki imaj versiyonu güncelleniyor..."
-                        sed -i "s|image: ${NEXUS_REPO}/${IMAGE_NAME}:.*|image: ${FULL_IMAGE}|g" day-24/deployment.yaml
+                        // SED komutu PULL_IMAGE'ı yaml dosyasına yazıyor
+                        sed -i "s|image: ${NEXUS_PULL_REPO}/${IMAGE_NAME}:.*|image: ${PULL_IMAGE}|g" day-24/deployment.yaml
 
                         echo "Değişiklik commit ediliyor ve GitHub'a pushlanıyor..."
                         git add day-24/deployment.yaml
@@ -104,12 +110,11 @@ pipeline {
         }
     }
 
-	post {
+    post {
         always {
             echo 'Pipeline tamamlandı.'
         }
         success {
-            // Tek tırnak yerine çift tırnak (") kullanıyoruz
             echo "Tebrikler! Kod alındı, analiz edildi, imaj Nexus'a aktarıldı ve ArgoCD manifestosu güncellendi."
         }
         failure {
