@@ -104,12 +104,13 @@ pipeline {
         }
     }
 
-    post {
+	post {
         always {
             echo 'Pipeline tamamlandı.'
         }
         success {
-            echo 'Tebrikler! Kod alındı, analiz edildi, imaj Nexus'a aktarıldı ve ArgoCD manifestosu güncellendi.'
+            // Tek tırnak yerine çift tırnak (") kullanıyoruz
+            echo "Tebrikler! Kod alındı, analiz edildi, imaj Nexus'a aktarıldı ve ArgoCD manifestosu güncellendi."
         }
         failure {
             echo 'Hata! Pipeline bir adımda başarısız oldu.'
