@@ -29,7 +29,7 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                checkout scm // Kodu workspace'e almak için zorunlu adım
+                checkout scm
                 echo "Kod GitHub deposundan çekildi."
                 sh 'ls -la'
             }
@@ -51,7 +51,6 @@ pipeline {
         
         stage('Build Docker Image') {
             steps {
-                // Docker build komutunu ilgili klasörün içinde çalıştırıyoruz
                 dir("${WORK_DIR}") {
                     echo "Docker İmajı Build Ediliyor: ${DOCKER_IMAGE}"
                     sh "docker build -t ${DOCKER_IMAGE} ."
@@ -59,21 +58,18 @@ pipeline {
             }
         }
         
-	stage('Push Docker Image to Nexus') {
+        stage('Push Docker Image to Nexus') {
             steps {
                 echo 'Docker İmajı Nexus Repository Manager adresine yükleniyor...'
                 script {
                     withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-                        // Her sh komutunu ayrı ve çift tırnak (") ile vererek
-                        // hem Jenkins değişkenlerinin çözülmesini hem de kabuğun hata yapmamasını sağlıyoruz.
-                        sh "echo 'Nexus'a login olunuyor...'"
-                        // DİKKAT: Şifreyi doğrudan komuta yazmak yerine stdout üzerinden iletiyoruz (Güvenli yöntem)
+                        echo "Nexus'a login olunuyor..."
                         sh "echo \${NEXUS_PASS} | docker login -u \${NEXUS_USER} --password-stdin ${NEXUS_PUSH_REPO}"
 
-                        sh "echo 'İmaj Nexus formatında etiketleniyor...'"
+                        echo "İmaj Nexus formatında etiketleniyor..."
                         sh "docker tag ${DOCKER_IMAGE} ${PUSH_IMAGE}"
                         
-                        sh "echo 'İmaj Nexus'a pushlanıyor...'"
+                        echo "İmaj Nexus'a pushlanıyor..."
                         sh "docker push ${PUSH_IMAGE}"
                     }
                 }
@@ -87,28 +83,25 @@ pipeline {
             }
         }
 
-	stage('Update Manifest & Push to GitHub (GitOps)') {
+        stage('Update Manifest & Push to GitHub (GitOps)') {
             steps {
                 withCredentials([usernamePassword(credentialsId: "${GIT_CREDENTIAL_ID}", passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
-                    // Her komutu tek satırlık çift tırnaklı (") sh bloklarına böldük.
-                    sh "echo 'Jenkins Git kimliği tanımlanıyor...'"
+                    echo "Jenkins Git kimliği tanımlanıyor..."
                     sh "git config user.email 'jenkins@devops-journey.local'"
                     sh "git config user.name 'Jenkins CI'"
 
-                    sh "echo 'day-24/deployment.yaml içindeki imaj versiyonu güncelleniyor...'"
-                    // Jenkins değişkenleri (${PULL_IMAGE} vb.) doğrudan çözülecek
+                    echo "day-24/deployment.yaml içindeki imaj versiyonu güncelleniyor..."
                     sh "sed -i 's|image: ${NEXUS_PULL_REPO}/${IMAGE_NAME}:.*|image: ${PULL_IMAGE}|g' day-24/deployment.yaml"
 
-                    sh "echo 'Değişiklik commit ediliyor ve GitHub a pushlanıyor...'"
+                    echo "Değişiklik commit ediliyor ve GitHub'a pushlanıyor..."
                     sh "git add day-24/deployment.yaml"
                     sh "git commit -m 'ci: Update deployment image to ${IMAGE_TAG} [skip ci]'"
                     
-                    // GIT_USERNAME ve GIT_PASSWORD değişkenlerinin Linux kabuğunda çözülmesi için 
-                    // başlarına ters slash (\) koyarak Groovy'den kaçırdık.
                     sh "git push https://\${GIT_USERNAME}:\${GIT_PASSWORD}@${GITHUB_REPO} HEAD:main"
                 }
             }
         }
+    } 
 
     post {
         always {
