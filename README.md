@@ -40,7 +40,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [X] Day-22: AWS EKS Kurulumu, IAM Yapılandırması, Node Group ve FinOps (Maliyet Yönetimi)
 - [ ] **Aşama 5: CI/CD Pipeline Otomasyonu - 2 (Pull Tabanlı GitOps)**
 	- [X] Day-23: ArgoCD Kurulumu ve GitOps Mimarisine Giriş
- 	- [ ] Day 24: İlk GitOps Deployment'ı ve Jenkins-ArgoCD Entegrasyonu
+ 	- [X] Day 24: İlk GitOps Deployment'ı ve Jenkins-ArgoCD Entegrasyonu
 ---
 
 ## 📅 Day 1: Linux Temelleri & Sistem Yönetimi
@@ -2480,3 +2480,200 @@ kubectl port-forward svc/argocd-server -n argocd 8080:443
 
 ## 🌐 Arayüz Erişimi: 
 Tarayıcıdan https://localhost:8080 adresine gidildi. Kullanıcı adı admin, şifre ise terminalden kopyalanan değer olarak kullanıldı.
+
+# 🚀 Day-24: Jenkins, Nexus, SonarQube ve ArgoCD ile Uçtan Uca GitOps Pipeline
+
+Bu aşamada, geleneksel **Push-Based** dağıtım modelinden modern **Pull-Based (GitOps)** mimarisine geçiş yapılmıştır. Jenkins artık doğrudan Kubernetes kümesine müdahale etmez; bunun yerine yeni Docker imajını derler, Nexus'a yükler ve GitHub'daki Kubernetes manifest (`deployment.yaml`) dosyasını günceller. Küme içerisindeki **ArgoCD**, GitHub'daki bu değişikliği algılayarak uygulamayı otomatik olarak senkronize eder.
+
+---
+
+## 🔄 Mimari Akış (GitOps Workflow)
+
+1. **Checkout:** Kaynak kod GitHub deposundan çekilir.
+2. **SonarQube Analysis:** Kod kalitesi ve güvenlik zafiyetleri taranır.
+3. **Build Docker Image:** Uygulama `build-<BUILD_NUMBER>` dinamik etiketiyle imaj haline getirilir.
+4. **Push to Nexus:** İmaj yerel Nexus Docker Registry (`localhost:8083`) üzerine yüklenir.
+5. **Update Manifest (GitOps):** Jenkins, `sed` komutu ile `day-24/deployment.yaml` içindeki imaj etiketini günceller ve `[skip ci]` etiketiyle GitHub'a pushlar.
+6. **ArgoCD Sync:** ArgoCD, GitHub'daki manifest değişikliğini yakalar ve Minikube üzerinde yeni pod'ları ayağa kaldırır.
+
+---
+
+## 📄 Nihai `Jenkinsfile`
+
+```groovy
+pipeline {
+    agent any
+
+    environment {
+        // ArgoCD'nin değişiklikleri algılaması için dinamik etiket (BUILD_NUMBER)
+        IMAGE_NAME = 'my-python-app'
+        IMAGE_TAG = "build-${BUILD_NUMBER}"
+        DOCKER_IMAGE = "${IMAGE_NAME}:${IMAGE_TAG}"
+        
+        // Jenkins'in imajı pushlayacağı adres (WSL/Host üzerinden)
+        NEXUS_PUSH_REPO = "localhost:8083"
+        PUSH_IMAGE = "${NEXUS_PUSH_REPO}/${DOCKER_IMAGE}"
+        
+        // Minikube'un (ArgoCD) imajı çekeceği adres (Container içinden Host'a erişim)
+        NEXUS_PULL_REPO = "host.minikube.internal:8083"
+        PULL_IMAGE = "${NEXUS_PULL_REPO}/${DOCKER_IMAGE}"
+
+        // Çalışma dizini
+        WORK_DIR = 'day-24/'
+        
+        // GitOps Entegrasyonu
+        GITHUB_REPO = "[github.com/devopsjrtr/devops-journey.git](https://github.com/devopsjrtr/devops-journey.git)"
+        GIT_CREDENTIAL_ID = "github-gitops-token"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                echo "Kod GitHub deposundan çekildi."
+                sh 'ls -la'
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                script {
+                    dir("${WORK_DIR}") {
+                        withCredentials([string(credentialsId: 'sonar-token', variable: 'MY_SONAR_TOKEN')]) {
+                            echo 'SonarQube Statik Kod Analizi Başlatılıyor...'
+                            sh 'chmod -R 777 .'
+                            sh 'docker run --rm --net cicd-net -e SONAR_TOKEN=' + MY_SONAR_TOKEN + ' --volumes-from jenkins -w "' + WORKSPACE + '/day-24" sonarsource/sonar-scanner-cli -Dsonar.host.url=http://sonarqube:9000 -Dsonar.projectKey=my-python-app -Dsonar.sources=.'
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                dir("${WORK_DIR}") {
+                    echo "Docker İmajı Build Ediliyor: ${DOCKER_IMAGE}"
+                    sh "docker build -t ${DOCKER_IMAGE} ."
+                }
+            }
+        }
+        
+        stage('Push Docker Image to Nexus') {
+            steps {
+                echo 'Docker İmajı Nexus Repository Manager adresine yükleniyor...'
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
+                        echo "Nexus'a login olunuyor..."
+                        sh "echo \${NEXUS_PASS} | docker login -u \${NEXUS_USER} --password-stdin ${NEXUS_PUSH_REPO}"
+
+                        echo "İmaj Nexus formatında etiketleniyor..."
+                        sh "docker tag ${DOCKER_IMAGE} ${PUSH_IMAGE}"
+                        
+                        echo "İmaj Nexus'a pushlanıyor..."
+                        sh "docker push ${PUSH_IMAGE}"
+                    }
+                }
+            }
+        }       
+ 
+        stage('Test & Verify') {
+            steps {
+                echo 'Uygulama İmajı Doğrulanıyor...'
+                sh "docker images | grep ${IMAGE_NAME}"
+            }
+        }
+
+        stage('Update Manifest & Push to GitHub (GitOps)') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: "${GIT_CREDENTIAL_ID}", passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
+                    echo "Jenkins Git kimliği tanımlanıyor..."
+                    sh "git config user.email 'jenkins@devops-journey.local'"
+                    sh "git config user.name 'Jenkins CI'"
+
+                    echo "day-24/deployment.yaml içindeki imaj versiyonu güncelleniyor..."
+                    sh "sed -i 's|image: ${NEXUS_PULL_REPO}/${IMAGE_NAME}:.*|image: ${PULL_IMAGE}|g' day-24/deployment.yaml"
+
+                    echo "Değişiklik commit ediliyor ve GitHub'a pushlanıyor..."
+                    sh "git add day-24/deployment.yaml"
+                    sh "git commit -m 'ci: Update deployment image to ${IMAGE_TAG} [skip ci]'"
+                    
+                    sh "git push https://\${GIT_USERNAME}:\${GIT_PASSWORD}@${GITHUB_REPO} HEAD:main"
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Pipeline tamamlandı.'
+        }
+        success {
+            echo "Tebrikler! Kod alındı, analiz edildi, imaj Nexus'a aktarıldı ve ArgoCD manifestosu güncellendi."
+        }
+        failure {
+            echo 'Hata! Pipeline bir adımda başarısız oldu.'
+        }
+    }
+}
+```
+
+---
+
+## 🛠️ Karşılaşılan Hatalar ve Çözümleri (Troubleshooting Rehberi)
+
+Kurulum ve entegrasyon sürecinde lokal altyapı (WSL + Minikube + Docker) ve Groovy sözdizimi kaynaklı karşılaşılan hatalar ve uygulanan çözümler aşağıda belgelenmiştir:
+
+### 1. Groovy Kesme İşareti (Single Quote) Sözdizimi Hatası
+* **Hata:** `WorkflowScript: 112: unexpected char: '''`
+* **Sebep:** `post` bloğundaki `echo` mesajı tek tırnak (`'`) ile başlatılıp metin içinde Türkçe kesme işareti (`Nexus'a`) kullanıldığında Groovy dizgenin erken bittiğini varsaydı.
+* **Çözüm:** İçinde kesme işareti barındıran `echo` metinleri çift tırnak (`"..."`) içine alındı.
+
+### 2. Git Pathspec (Dosya Yolu) Uyuşmazlığı
+* **Hata:** `fatal: pathspec 'k8s/deployment.yaml' did not match any files`
+* **Sebep:** `sed` komutu `day-24/deployment.yaml` dosyasını güncellerken, `git add` komutunun eski klasör yapısına (`k8s/deployment.yaml`) bakması.
+* **Çözüm:** `git add day-24/deployment.yaml` olarak dosya yolu eşitlendi.
+
+### 3. WSL & Minikube Ağ İzolasyonu (Split-Horizon DNS Sorunu)
+* **Hata 1 (Minikube tarafında):** `dial tcp [::1]:8083: connect: connection refused` (Minikube `localhost:8083` adresini kendi container içi sanıp Nexus'a ulaşamadı).
+* **Hata 2 (Jenkins tarafında):** `lookup host.minikube.internal: no such host` (Adres `host.minikube.internal:8083` yapıldığında Jenkins bu özel Minikube DNS kaydını çözemedi).
+* **Çözüm:** `Jenkinsfile` içinde **Split-Repo** stratejisi uygulandı:
+  * Jenkins imajı pushlarken `NEXUS_PUSH_REPO = "localhost:8083"` adresini kullandı.
+  * `deployment.yaml` içine yazılan adres ise Minikube'un host makineye erişebileceği `NEXUS_PULL_REPO = "host.minikube.internal:8083"` olarak ayarlandı.
+
+### 4. Çok Satırlı Shell (`"""`) ve Parantez/Tırnak Çakışmaları
+* **Hata:** `Syntax error: "(" unexpected` ve `expecting '}', found ''`
+* **Sebep:** Çok satırlı `sh """..."""` blokları içinde hem Groovy değişkenleri (`${VAR}`) hem de maskelenmiş ortam değişkenlerinin (`\${NEXUS_PASS}`) tek tırnaklı Türkçe metinlerle birleşmesi alt kabukta (subshell) kırılmaya yol açtı. Ayrıca `stages` bloğunun kapanış parantezi eksik kaldı.
+* **Çözüm:** 
+  * Çok satırlı `sh` blokları yerine tek satırlık izole `sh "..."` komutlarına geçildi.
+  * Şifre güvenliği için `--password-stdin` yapısına geçildi: `sh "echo \${NEXUS_PASS} | docker login -u \${NEXUS_USER} --password-stdin ${NEXUS_PUSH_REPO}"`.
+  * Eksik olan `stages` kapanış parantezi (`}`) eklendi.
+
+### 5. HTTP (Insecure Registry) ve Nexus Yetkilendirme Hatası (`ImagePullBackOff`)
+* **Hata:** `http: server gave HTTP response to HTTPS client` ve ardından gelen yetki reddi (`ErrImagePull` / `ImagePullBackOff`).
+* **Sebep:** Kubernetes varsayılan olarak imaj depolarıyla HTTPS üzerinden konuşmaya zorlar; ancak yerel Nexus HTTP üzerinden çalışmaktadır. Ayrıca Nexus imaj çekmek için kimlik doğrulaması beklemektedir.
+* **Çözüm:**
+  1. Minikube, yerel HTTP registry'sine güvenecek şekilde yeniden başlatıldı:
+     ```bash
+     minikube stop
+     minikube start --insecure-registry="host.minikube.internal:8083"
+     ```
+  2. Kubernetes'in Nexus'tan imaj çekerken kimlik doğrulaması yapabilmesi için `docker-registry` tipinde bir Secret oluşturuldu ve varsayılan `ServiceAccount` üzerine yamandı:
+     ```bash
+     kubectl create secret docker-registry nexus-creds \
+       --docker-server=host.minikube.internal:8083 \
+       --docker-username=admin \
+       --docker-password=<NEXUS_PASSWORD>
+
+     kubectl patch serviceaccount default -p '{"imagePullSecrets": [{"name": "nexus-creds"}]}'
+     ```
+
+### 6. Bonus: ArgoCD Admin Şifresini Kurtarma / Sıfırlama ve Uygulama Erişimi
+* **ArgoCD İlk Kurulum Şifresini Okuma:**
+  ```bash
+  kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo
+  ```
+* **Uygulamaya Windows Tarayıcısından Erişim (Port-Forward):**
+  ```bash
+  kubectl port-forward svc/my-app-svc 30050:5000
+  ```
+  Tarayıcı üzerinden `http://localhost:30050` adresine gidilerek uygulamanın çalıştığı doğrulandı.
