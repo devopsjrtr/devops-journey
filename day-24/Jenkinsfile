@@ -59,27 +59,27 @@ pipeline {
             }
         }
         
-        stage('Push Docker Image to Nexus') {
+	stage('Push Docker Image to Nexus') {
             steps {
                 echo 'Docker İmajı Nexus Repository Manager adresine yükleniyor...'
                 script {
                     withCredentials([usernamePassword(credentialsId: 'nexus-docker-creds', usernameVariable: 'NEXUS_USER', passwordVariable: 'NEXUS_PASS')]) {
-                        sh """
-                            echo "Nexus'a login olunuyor..."
-                            // Jenkins, localhost:8083 (Push Repo) kullanıyor
-                            docker login -u \${NEXUS_USER} -p \${NEXUS_PASS} ${NEXUS_PUSH_REPO}
+                        // Her sh komutunu ayrı ve çift tırnak (") ile vererek
+                        // hem Jenkins değişkenlerinin çözülmesini hem de kabuğun hata yapmamasını sağlıyoruz.
+                        sh "echo 'Nexus'a login olunuyor...'"
+                        // DİKKAT: Şifreyi doğrudan komuta yazmak yerine stdout üzerinden iletiyoruz (Güvenli yöntem)
+                        sh "echo \${NEXUS_PASS} | docker login -u \${NEXUS_USER} --password-stdin ${NEXUS_PUSH_REPO}"
 
-                            echo "İmaj Nexus formatında etiketleniyor..."
-                            docker tag ${DOCKER_IMAGE} ${PUSH_IMAGE}
-                            
-                            echo "İmaj Nexus'a pushlanıyor..."
-                            docker push ${PUSH_IMAGE}
-                        """
+                        sh "echo 'İmaj Nexus formatında etiketleniyor...'"
+                        sh "docker tag ${DOCKER_IMAGE} ${PUSH_IMAGE}"
+                        
+                        sh "echo 'İmaj Nexus'a pushlanıyor...'"
+                        sh "docker push ${PUSH_IMAGE}"
                     }
                 }
             }
         }       
-        
+ 
         stage('Test & Verify') {
             steps {
                 echo 'Uygulama İmajı Doğrulanıyor...'
@@ -87,28 +87,28 @@ pipeline {
             }
         }
 
-        stage('Update Manifest & Push to GitHub (GitOps)') {
+	stage('Update Manifest & Push to GitHub (GitOps)') {
             steps {
                 withCredentials([usernamePassword(credentialsId: "${GIT_CREDENTIAL_ID}", passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
-                    sh """
-                        echo "Jenkins Git kimliği tanımlanıyor..."
-                        git config user.email "jenkins@devops-journey.local"
-                        git config user.name "Jenkins CI"
+                    // Her komutu tek satırlık çift tırnaklı (") sh bloklarına böldük.
+                    sh "echo 'Jenkins Git kimliği tanımlanıyor...'"
+                    sh "git config user.email 'jenkins@devops-journey.local'"
+                    sh "git config user.name 'Jenkins CI'"
 
-                        echo "day-24/deployment.yaml içindeki imaj versiyonu güncelleniyor..."
-                        // SED komutu PULL_IMAGE'ı yaml dosyasına yazıyor
-                        sed -i "s|image: ${NEXUS_PULL_REPO}/${IMAGE_NAME}:.*|image: ${PULL_IMAGE}|g" day-24/deployment.yaml
+                    sh "echo 'day-24/deployment.yaml içindeki imaj versiyonu güncelleniyor...'"
+                    // Jenkins değişkenleri (${PULL_IMAGE} vb.) doğrudan çözülecek
+                    sh "sed -i 's|image: ${NEXUS_PULL_REPO}/${IMAGE_NAME}:.*|image: ${PULL_IMAGE}|g' day-24/deployment.yaml"
 
-                        echo "Değişiklik commit ediliyor ve GitHub'a pushlanıyor..."
-                        git add day-24/deployment.yaml
-                        git commit -m "ci: Update deployment image to ${IMAGE_TAG} [skip ci]"
-                        
-                        git push https://${GIT_USERNAME}:\${GIT_PASSWORD}@${GITHUB_REPO} HEAD:main
-                    """
+                    sh "echo 'Değişiklik commit ediliyor ve GitHub a pushlanıyor...'"
+                    sh "git add day-24/deployment.yaml"
+                    sh "git commit -m 'ci: Update deployment image to ${IMAGE_TAG} [skip ci]'"
+                    
+                    // GIT_USERNAME ve GIT_PASSWORD değişkenlerinin Linux kabuğunda çözülmesi için 
+                    // başlarına ters slash (\) koyarak Groovy'den kaçırdık.
+                    sh "git push https://\${GIT_USERNAME}:\${GIT_PASSWORD}@${GITHUB_REPO} HEAD:main"
                 }
             }
         }
-    }
 
     post {
         always {
