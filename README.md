@@ -2440,7 +2440,7 @@ Limit $10 olarak belirlendi ve uyarı e-postası eklendi.
 
 ## 📅 Day 23: ArgoCD ile GitOps Mimarisine Giriş
 
-> 🎯 **Günün Amacı:** CI/CD boru hattımızın dağıtım (Deployment) aşamasını evrimleştirerek GitOps felsefesine geçiş yapmak ve Kubernetes yönetiminde endüstri standardı olan ArgoCD'nin kurulumunu Minikube üzerinde tamamlamak.
+> 🎯 **Günün Amacı:** CI/CD pipeline'ımızın dağıtım (Deployment) aşamasını evrimleştirerek GitOps felsefesine geçiş yapmak ve Kubernetes yönetiminde endüstri standardı olan ArgoCD'nin kurulumunu Minikube üzerinde tamamlamak.
 
 ### 📚 Özet Ders Notu
 GitOps Nedir?: Sistemin istenen durumu (Desired State) ile mevcut durumunun (Actual State) tek ve mutlak doğruluğunun (Single Source of Truth) Git reposu olarak kabul edildiği operasyonel modeldir.
@@ -2682,7 +2682,7 @@ Kurulum ve entegrasyon sürecinde lokal altyapı (WSL + Minikube + Docker) ve Gr
 
 # 📊 Day-25: Kubernetes Üzerinde Gözlemlenebilirlik (Prometheus, Grafana ve Loki / PLG Stack)
 
-Uçtan uca GitOps CI/CD boru hattının tamamlanmasının ardından, küme içerisindeki kaynak tüketimini izlemek (**Monitoring**) ve uygulama loglarını merkezi olarak toplamak (**Logging**) amacıyla **PLG Stack (Promtail - Loki - Grafana)** ve **Prometheus** mimarisi kurulmuştur.
+Uçtan uca GitOps CI/CD pipeline'ımızın tamamlanmasının ardından, küme içerisindeki kaynak tüketimini izlemek (**Monitoring**) ve uygulama loglarını merkezi olarak toplamak (**Logging**) amacıyla **PLG Stack (Promtail - Loki - Grafana)** ve **Prometheus** mimarisi kurulmuştur.
 
 ---
 
