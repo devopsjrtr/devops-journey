@@ -41,7 +41,7 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
 - [X] **Aşama 5: CI/CD Pipeline Otomasyonu - 2 (Pull Tabanlı GitOps)**
 	- [X] Day-23: ArgoCD Kurulumu ve GitOps Mimarisine Giriş
  	- [X] Day 24: İlk GitOps Deployment'ı ve Jenkins-ArgoCD Entegrasyonu
-- [X] **Aşama 6: İzleme ve Loglama(Kayıt Günlüğü Tutma) **
+- [X] **Aşama 6: İzleme ve Loglama(Kayıt Günlüğü Tutma)**
 	- [X] Day 25: İzleme ve Loglama Ortamının Kurulumu ve Gösterimi
 ---
 
