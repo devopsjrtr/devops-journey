@@ -16,6 +16,6 @@ spec:
       containers:
       - name: my-app
         # İmaj yolunu Jenkinsfile'daki NEXUS_REPO yapısına uygun hale getirdik
-        image: host.minikube.internal:8083/my-python-app:build-7
+        image: host.minikube.internal:8083/my-python-app:build-8
         ports:
         - containerPort: 5000
