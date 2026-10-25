@@ -38,9 +38,11 @@ Bu repo, kişisel Devops çalışmalarıma ait tüm teorik notları, cheatsheet'
   - [X] Day-20: Orchestration - Kubernetes Namespaces ve Resource Limits (İzole Ortamlar ve Kaynak Yönetimi)
   - [X] Day-21: Orchestration - Kubernetes Liveness ve Readiness Probes (Sağlık Kontrolleri)
   - [X] Day-22: AWS EKS Kurulumu, IAM Yapılandırması, Node Group ve FinOps (Maliyet Yönetimi)
-- [ ] **Aşama 5: CI/CD Pipeline Otomasyonu - 2 (Pull Tabanlı GitOps)**
+- [X] **Aşama 5: CI/CD Pipeline Otomasyonu - 2 (Pull Tabanlı GitOps)**
 	- [X] Day-23: ArgoCD Kurulumu ve GitOps Mimarisine Giriş
  	- [X] Day 24: İlk GitOps Deployment'ı ve Jenkins-ArgoCD Entegrasyonu
+- [X] **Aşama 6: İzleme ve Loglama(Kayıt Günlüğü Tutma) **
+	- [X] Day 25: İzleme ve Loglama Ortamının Kurulumu ve Gösterimi
 ---
 
 ## 📅 Day 1: Linux Temelleri & Sistem Yönetimi
@@ -2677,3 +2679,154 @@ Kurulum ve entegrasyon sürecinde lokal altyapı (WSL + Minikube + Docker) ve Gr
   kubectl port-forward svc/my-app-svc 30050:5000
   ```
   Tarayıcı üzerinden `http://localhost:30050` adresine gidilerek uygulamanın çalıştığı doğrulandı.
+
+# 📊 Day-25: Kubernetes Üzerinde Gözlemlenebilirlik (Prometheus, Grafana ve Loki / PLG Stack)
+
+Uçtan uca GitOps CI/CD boru hattının tamamlanmasının ardından, küme içerisindeki kaynak tüketimini izlemek (**Monitoring**) ve uygulama loglarını merkezi olarak toplamak (**Logging**) amacıyla **PLG Stack (Promtail - Loki - Grafana)** ve **Prometheus** mimarisi kurulmuştur.
+
+---
+
+## 🏗️ Mimari Seçim: Neden ELK (Elasticsearch-Logstash-Kibana) Yerine PLG Stack?
+
+Geleneksel **ELK Stack** mimarisinde Elasticsearch tüm log metinlerini tam indeksler (Full-Text Index) ve yüksek miktarda sistem kaynağı (minimum 4-8 GB RAM) tüketir. Lokal Minikube ortamında Jenkins, Nexus, SonarQube ve ArgoCD ile birlikte çalıştığında bellek yetersizliğine (`OOMKilled`) yol açmaması ve modern Cloud-Native standartlarına uyum sağlaması adına **Grafana Loki** tercih edilmiştir.
+
+| Katman | Kullanılan Araç | Görevi |
+| :--- | :--- | :--- |
+| **Metrik Toplama** | **Prometheus** | Pod durumu, CPU ve RAM gibi metrikleri zaman serisi (Time Series) olarak toplar. |
+| **Log Toplama** | **Promtail** | Her node üzerinde DaemonSet olarak çalışır; pod loglarını (`stdout`) okuyup Loki'ye iletir. |
+| **Log Depolama** | **Grafana Loki** | Logların tamamını indekslemek yerine sadece etiketlerini (`app=my-app`) indeksleyerek düşük kaynak tüketimiyle saklar. |
+| **Görselleştirme** | **Grafana** | Hem Prometheus metriklerini hem de Loki loglarını tek bir arayüzde (Single Pane of Glass) birleştirir. |
+
+---
+
+## 🚀 Kurulum Adımları (Helm ile)
+
+### 1. Hazırlık ve Helm Repolarının Eklenmesi
+İzleme araçlarının uygulama pod'larıyla (`default`) karışmaması için izole bir `monitoring` namespace'i oluşturulmuş ve resmi Helm depoları eklenmiştir:
+
+```bash
+mkdir -p ~/devops-journey/day-25 && cd ~/devops-journey/day-25
+
+# Helm depolarının eklenmesi ve güncellenmesi
+helm repo add prometheus-community [https://prometheus-community.github.io/helm-charts](https://prometheus-community.github.io/helm-charts)
+helm repo add grafana [https://grafana.github.io/helm-charts](https://grafana.github.io/helm-charts)
+helm repo update
+
+# İzole namespace oluşturulması
+kubectl create namespace monitoring
+```
+
+### 2. Prometheus ve Grafana Kurulumu (`kube-prometheus-stack`)
+Prometheus, Grafana, Alertmanager ve Kubernetes metrik toplayıcılarını (`node-exporter`, `kube-state-metrics`) tek pakette kuran `kube-prometheus-stack` yüklenmiştir:
+
+```bash
+helm install monitoring prometheus-community/kube-prometheus-stack \
+  --namespace monitoring
+```
+
+### 3. Loki ve Promtail Kurulumu (`loki-stack`)
+Mevcut Grafana kurulumunu kullanmak üzere (`grafana.enabled=false`) sadece Loki ve Promtail bileşenleri aktif edilerek kurulmuştur:
+
+```bash
+helm install loki grafana/loki-stack \
+  --namespace monitoring \
+  --set grafana.enabled=false \
+  --set prometheus.enabled=false \
+  --set promtail.enabled=true
+```
+
+### 4. Grafana Arayüzüne Erişim
+Grafana `admin` şifresi Kubernetes Secret objesinden okunmuş ve servis `port-forward` ile dışarı açılmıştır:
+
+```bash
+# Admin şifresini görüntüleme (Varsayılan: prom-operator)
+kubectl get secret -n monitoring monitoring-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
+
+# Port yönlendirme (http://localhost:3000)
+kubectl port-forward svc/monitoring-grafana -n monitoring 3000:80
+```
+
+* **Loki Veri Kaynağı (Data Source) Tanımı:** Grafana arayüzünde **Connections -> Data sources -> Add new data source -> Loki** adımları izlenerek URL alanına küme içi adres olan `http://loki:3100` (veya FQDN olarak `http://loki.monitoring.svc.cluster.local:3100`) tanımlanmıştır.
+
+---
+
+## 🖥️ Özel Gösterge Paneli (Custom Dashboard) Yapılandırması
+
+Uygulamanın hem donanım metriklerini hem de canlı loglarını tek ekranda izlemek için **`My-App GitOps Observability Dashboard`** adında özel bir panel oluşturulmuştur.
+
+### Panel 1: Aktif Pod Sayısı (Durum Göstergesi)
+* **Data Source:** `Prometheus`
+* **Görselleştirme Tipi:** `Stat` *(Sağ üstteki `Time series` yanındaki `Change` butonuna tıklanarak seçilir)*
+* **Panel Başlığı:** `Aktif Pod Sayısı (Ready)`
+* **PromQL Sorgusu:**
+  ```promql
+  sum(kube_pod_status_ready{namespace="default", pod=~"my-app-.*", condition="true"})
+  ```
+* **Thresholds (Eşik Değerleri - Absolute Mode):**
+  * 🟢 **`2`** -> `Green` (Grafana'da girilen sayı `>= 2` anlamına gelir; 2 ve üzeri sağlıklı pod olduğunda kutu yeşil yanar).
+  * 🔴 **`Base`** -> `Red` (Pod sayısı 2'nin altına düştüğünde kutu kırmızıya döner).
+
+### Panel 2: Pod Bellek (RAM) Kullanımı
+* **Data Source:** `Prometheus`
+* **Görselleştirme Tipi:** `Time series`
+* **Panel Başlığı:** `my-app Pod RAM Kullanımı`
+* **Standard Options -> Unit:** `Data -> bytes (IEC)` veya `megabytes`
+* **PromQL Sorgusu:**
+  ```promql
+  sum(container_memory_working_set_bytes{namespace="default", pod=~"my-app-.*", container!="", container!="POD"}) by (pod)
+  ```
+
+### Panel 3: Pod CPU Kullanımı
+* **Data Source:** `Prometheus`
+* **Görselleştirme Tipi:** `Time series`
+* **Panel Başlığı:** `my-app Pod CPU Kullanımı (Core)`
+* **PromQL Sorgusu:**
+  ```promql
+  sum(rate(container_cpu_usage_seconds_total{namespace="default", pod=~"my-app-.*", container!="", container!="POD"}[2m])) by (pod)
+  ```
+
+### Panel 4: Canlı Uygulama Logları (Loki)
+* **Data Source:** `Loki`
+* **Görselleştirme Tipi:** `Logs`
+* **Panel Başlığı:** `my-app Canlı Uygulama Logları (Loki)`
+* **LogQL Sorgusu:**
+  ```logql
+  {app="my-app"}
+  ```
+* **Ek Ayarlar (Logs Options):** `Time` (Zaman damgası), `Unique labels` (Pod etiketi) ve `Wrap lines` (Satır kaydırma) aktif edilmiştir.
+
+---
+
+## 🛠️ Karşılaşılan Hatalar ve Çözümleri (Troubleshooting Rehberi)
+
+### 1. Loki Veri Kaynağı Test Hatası (`Unable to connect with Loki`)
+* **Hata:** Grafana'da Loki URL'si (`http://loki:3100`) yazılıp **Save & test** butonuna basıldığında `"Unable to connect with Loki. Please check the server logs for more details."` hatası alındı.
+* **Teşhis:**
+  1. `kubectl get pods,svc -n monitoring | grep loki` ile pod ve servislerin aktif olduğu doğrulandı.
+  2. Küme içinden geçici bir pod ile Loki'nin sağlık uç noktası test edildi ve `ready` yanıtı döndüğü görüldü:
+     ```bash
+     kubectl run test-curl --rm -i --tty --image=curlimages/curl -n monitoring -- curl -v http://loki:3100/ready
+     ```
+  3. **Explore** sekmesinden Loki seçildiğinde `app` ve `namespace` etiketlerinin ve uygulama loglarının sorunsuz aktığı tespit edildi.
+* **Sebep:** `kube-prometheus-stack` ile kurulan güncel Grafana sürümü (v10.4+/v11+), "Save & test" butonuna basıldığında Loki'nin yeni API uç noktalarını (`/loki/api/v1/format_query` vb.) sorgulamaktadır. Ancak `grafana/loki-stack` Helm chart'ı varsayılan olarak eski **Loki `v2.6.1`** imajını kurduğu için bu uç noktada `404 Not Found` dönmekte ve arayüzde sahte (false-positive) bir bağlantı hatası göstermektedir.
+* **Çözüm:**
+  * **Yöntem A (Hızlı Kullanım):** Hata sadece test butonundaki sürüm uyuşmazlığından kaynaklandığı ve ayarlar kaydedildiği için doğrudan **Explore** ve **Dashboard** ekranlarında `{app="my-app"}` sorgusuyla loglar izlenmeye devam edildi.
+  * **Yöntem B (Kalıcı İmaj Güncellemesi):** İstenildiği takdirde Loki imajını güncel API uç noktalarını destekleyen `2.9.10` sürümüne yükselterek test ekranındaki uyarı tamamen giderilebilir:
+    ```bash
+    helm upgrade loki grafana/loki-stack -n monitoring \
+      --set grafana.enabled=false \
+      --set prometheus.enabled=false \
+      --set promtail.enabled=true \
+      --set loki.image.tag=2.9.10
+    ```
+
+### 2. Grafana Yeni Arayüzünde (UI) Görselleştirme Tipi Arama Karmaşası
+* **Sorun:** Panel düzenleme ekranında sağ üstteki büyüteç (`🔍`) ikonuna tıklanıp `Stat` veya `Logs` aratıldığında sonuç çıkmaması.
+* **Sebep:** Sağ üstteki büyüteç ikonu grafik tiplerini değil, mevcut panelin altındaki ayar başlıklarını (`Title`, `Tooltip`, `Legend`, `Thresholds`) filtrelemektedir.
+* **Çözüm:** Görselleştirme tipini değiştirmek için büyüteç ikonuna değil, doğrudan **`Time series`** yazısının hemen yanındaki mavi **`Change`** bağlantısına tıklanarak açılan menüden `Stat` ve `Logs` görünümleri seçildi.
+
+### 3. Grafana Thresholds (Eşik Değeri) Mantığının Yapılandırılması
+* **Sorun:** Aktif pod sayısı `2` ve üzeri olduğunda yeşil, `2`'nin altına düştüğünde kırmızı yanması için büyüktür/küçüktür (`>=`) ifadesinin nasıl girileceği.
+* **Çözüm:** Grafana'da **Thresholds** alanı her sayısal adımı otomatik olarak **"bu değer ve üzeri" ($\ge$)** şeklinde yorumlar. Bu doğrultuda:
+  * Taban (**Base**) rengi **Red (Kırmızı)** yapıldı (0 ve 1 değerlerini kapsar).
+  * Üst eşik kutusuna doğrudan **`2`** yazılıp rengi **Green (Yeşil)** olarak ayarlandı (2 ve üzeri tüm değerleri kapsar).
